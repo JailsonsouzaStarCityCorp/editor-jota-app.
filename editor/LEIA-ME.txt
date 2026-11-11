@@ -1,0 +1,242 @@
+EDITOR DE MEMES - Termux (Android)
+===================================
+
+O que faz:
+- Coloca o meme dentro do seu template (Memudobr, Jota TV, MEME CLAUDE BR, Jotinha_React, DriveRush)
+- Escreve a headline em cima (aceita emoji)
+- Corta automaticamente legenda/logo/faixas de outras paginas
+- Preenche a area do video toda, sem bordas
+- Zoom leve automatico a cada 2 segundos
+- Salva em: Armazenamento interno > Memes_Prontos
+
+
+1) INSTALACAO (so uma vez)
+--------------------------
+a) Instale o Termux pela F-DROID (f-droid.org). A versao da Play Store e antiga e nao funciona.
+
+b) Abra o Termux e cole, um por vez:
+
+   termux-setup-storage
+   (toque em PERMITIR)
+
+   pkg update -y && pkg upgrade -y
+
+   pkg install -y python ffmpeg python-pillow unzip
+
+c) Deixe o arquivo editor_memes.zip na pasta Download do celular e cole:
+
+   cd ~ && unzip -o ~/storage/shared/Download/editor_memes.zip
+
+d) Atalho (opcional, mas recomendado):
+
+   echo 'alias meme="python ~/editor_memes/editar.py"' >> ~/.bashrc && source ~/.bashrc
+
+
+2) USO NO DIA A DIA
+-------------------
+Baixe o meme (ele vai para a pasta Download) e cole no Termux:
+
+   meme ultimo memudobr "Eu as 14h no trabalho depois do almoco:"
+
+  ultimo   = pega o video mais recente da pasta Download
+  memudobr = template (memudobr, jota, memeclaude, jotinha, driverush)
+
+Headline em dois blocos (pula linha com espaco entre eles), use | :
+
+   meme ultimo jota "O ponto fecha as 8h. | Eu as 7:55 ainda a 3 bairros:"
+
+Emoji funciona normal:
+
+   meme ultimo jota "A luta mais injusta do Invencivel 😳"
+
+
+2b) MODELO MEIA TELA (estilo corte de podcast)
+----------------------------------------------
+Imagem em cima + faixa vermelha com a headline + video embaixo.
+
+  Com a ultima FOTO baixada na pasta Download como imagem de cima:
+   meme ultimo jota "Sobrinha revela por que escondia o parentesco 😳" --modelo meiatela --imagem ultima
+
+  Sem foto (usa um quadro do proprio video em cima):
+   meme ultimo jota "Headline aqui" --modelo meiatela
+
+  Trocar a cor da faixa (hex):
+   --cor-faixa ffcc00   (amarelo)   --cor-faixa 1e88e5 (azul)
+
+Sem --imagem, o editor escolhe sozinho o quadro de MAIOR IMPACTO do video
+(pico de audio: grito, risada, reacao + imagem nitida e com contraste) e
+aplica mais cor, contraste e uma vinheta escura nas bordas.
+
+A imagem de cima aproxima devagar durante o video e o anti-duplicidade
+e o granulado continuam valendo.
+
+
+2b-PRO) MEIA TELA PRO (padrao dos canais de corte)
+-------------------------------------------------
+Os canais de corte (cortehubs, cityflow, cyberdefend, silencio, qgclipes, vrumm)
+agora saem sempre no modo PRO:
+ - GANCHO: os ~4s mais fortes do corte aparecem primeiro (ou escolha com --gancho 4-8.7)
+ - video deitado aparece INTEIRO com fundo desfocado (ninguem cortado nas pontas)
+ - zoom soco + flash + "boom" nos picos de audio (gritos, risadas, respostas)
+ - barra de progresso na cor da faixa
+ - trilha de tensao original que ABAIXA sozinha quando alguem fala
+ - voz tratada (equalizacao, compressao, volume padrao Reels/TikTok)
+ - encerramento proprio com a logo do canal
+Precisa (uma vez):  pkg install -y python-numpy
+
+Cortar direto do episodio inteiro:
+   meme episodio.mp4 cortehubs "Headline" --inicio 18:24 --fim 19:12 --gancho 4-8.7 --legenda
+
+Opcoes: --sem-gancho  --sem-musica  --texto-fim "A HISTORIA CONTINUA…"  --simples (modelo antigo)
+
+
+2c) CANAIS E MODELOS
+--------------------
+Template branco (padrao):  memudobr  jota  memeclaude  jotinha  madruga  memeverse
+Meia tela (corte):         cortehubs  cityflow  cyberdefend  silencio  qgclipes  vrumm
+Filme:                     thejota  neoronios  nexora  mentalista  driverush  zenthaku
+(driverush no template branco antigo: --modelo padrao)
+
+Os canais de corte ja usam meia tela sozinhos, e os de filme usam o modelo filme:
+   meme ultimo cortehubs "Headline" --imagem ultima
+   meme ultimo nexora "A luta mais injusta do Invencivel 😳" --parte "Parte 9"
+
+MODELO FILME: fundo com o proprio video desfocado (sem borda e sempre em
+movimento), logo do canal no topo, headline, video no meio, etiqueta amarela
+"PARTE X" (opcional, use --parte) e "Segue pra ver a proxima parte 🎬".
+Para trocar o texto de baixo:  --rodape "Seu texto"
+
+
+2d) LEGENDA ANIMADA (estilo TikTok)
+-----------------------------------
+Transcreve a fala sozinho e coloca legenda animada: grupos de 2-3 palavras
+que entram com "pulo", palavra falada em amarelo e maior. Funciona nos 3 modelos.
+
+Instalar (so uma vez, leva uns 10-15 min):
+   bash ~/editor_memes/instalar_legenda.sh
+   (para um modelo mais rapido e um pouco menos preciso: bash ~/editor_memes/instalar_legenda.sh base)
+
+Usar:
+   meme ultimo nexora "Headline" --legenda
+   meme ultimo cortehubs "Headline" --legenda --imagem ultima
+
+Trocar a cor do destaque:  --legenda-cor 00e5ff (azul)   --legenda-cor 39ff14 (verde)
+Video so com musica (sem fala): nao use --legenda.
+
+
+3) AJUSTES
+----------
+Ver uma previa rapida (imagem) antes de renderizar:
+   meme ultimo memudobr "frase" --previa
+
+Sobrou texto de outra pagina em cima do video? Corte mais:
+   meme ultimo memudobr "frase" --cortar-topo 120
+   (tambem existe --cortar-baixo 120)
+
+Zoom mais forte / mais fraco / desligado:
+   --zoom 0.10     (mais forte)
+   --zoom 0.03     (mais suave)
+   --zoom 0        (sem zoom)
+
+Velocidade fixa (o padrao ja e 3-7% mais rapido, aleatorio):
+   --velocidade 1.10   (10% mais rapido)
+
+Mudar o tempo do zoom:
+   --intervalo 3   (a cada 3 segundos)
+
+Usar o video inteiro, sem corte automatico:
+   --sem-corte-auto
+
+FADE: o canal jota ja sai com fade in/out automatico. Desligar: --sem-fade. Em outros canais: --fade
+
+Trocar ou tirar o texto de baixo:
+   --rodape "Segue pra mais 😂"
+   --rodape ""
+
+ANTI-DUPLICIDADE (ligado sempre): cada video sai diferente do original e dos outros:
+velocidade 3-7% maior, corta o comecinho, cor/contraste variados, granulado leve,
+enquadramento e zoom variados, volume levemente alterado e metadados novos.
+Para desligar: --sem-unico
+Espelhar a cena (so se NAO tiver texto dentro do video): --espelhar
+
+ANTI-IMAGEM-ESTATICA (Facebook): o quadro inteiro (template + video) flutua
+alguns pixels durante o video e recebe um granulado leve em movimento, para o
+Facebook nao acusar "Seu reel e uma imagem estatica".
+Para desligar: --estatico
+
+ANTI-BORDA (Facebook): o video ocupa a largura toda e o fundo branco tem uma
+textura quase invisivel, para o Facebook nao acusar "Seu video tem uma borda".
+Para voltar ao branco liso:  --fundo-liso
+
+
+4) DICAS
+--------
+- O video pronto fica em Memes_Prontos. Se nao aparecer na galeria na hora,
+  abra pelo app Arquivos ou reinicie a galeria.
+- Video de 15s leva menos de 1 minuto. Video de 1 min, uns 2 a 4 minutos.
+- Para ver todas as opcoes:  meme -h
+
+==================== NOVO: MODELO FOFOCA (JOTA EXPLICA) ====================
+O canal jotaexplica agora usa o modelo FOFOCA (substitui o modelo antigo dele):
+fundo escuro, logo JOTA EXPLICA, selo vermelho FOFOCA, headline grande com
+palavra amarela, linhas amarelas, barra de progresso vermelha, FONTE embaixo
+e legenda Salto de Cor automatica (se o whisper estiver instalado).
+
+  python ~/editor_memes/editar.py ultimo jotaexplica "TOGURO REVELA QUANTO | COBRA POR *1H30* | DE PALESTRA 💰" \
+      --fonte "pronunciamento do Toguro no YouTube" --card "R$ 190 MIL 💸@8.5"
+
+  |                 pula linha na headline
+  *palavra*         fica AMARELA na headline (sem asterisco, numeros ficam amarelos sozinhos)
+  --fonte "..."     texto da FONTE embaixo do video
+  --card "TXT@8.5"  card verde que aparece em 8.5s por 3s (ou "TXT@8.5-12"). Pode repetir
+  --selo "TRETA"    troca o texto do selo vermelho (padrao FOFOCA)
+  --sem-legenda     sem legenda automatica
+  --inicio/--fim    cortar o trecho, igual aos outros modelos
+
+==================== NOVO: NEORONIOSZ CLIPS (TEMA AZUL) ====================
+O canal neoronios agora usa o modelo FOFOCA com detalhes AZUIS:
+logo N, "NEORONIOSZ CLIPS", selo azul 🎬 CLIPS, linhas e barra azuis,
+palavra destacada azul, card azul, legenda Salto de Cor azul e @neoronios.zclips.
+
+  python ~/editor_memes/editar.py ultimo neoronios "HEADLINE AQUI COM *PALAVRA* AZUL 😳" --fonte "cena do filme" --card "TEXTO 🔥@5"
+
+  --selo "CENA"   troca o texto do selo (padrao CLIPS)
+
+==================== CAMPANHA ELIS JUSTI ====================
+Canal "elisjusti": logo oficial no topo o video todo, selo HISTORIA, detalhes rose gold,
+legenda Salto de Cor e @elisjusti embaixo. Nesse canal o editor NAO acelera a voz e NAO espelha
+(regra da campanha). O resto do anti-duplicidade continua.
+  No Jota Explica com o logo dela: python ~/editor_memes/editar.py ultimo jotaexplica "ELIS JUSTI ... *DESTAQUE* 😱" --logo-extra elisjusti
+  Perfil proprio dela: python ~/editor_memes/editar.py ultimo elisjusti "ELIS JUSTI ... *DESTAQUE* 😱" --inicio 12:19 --fim 13:04 --fonte "Piunti #268 com Elis Justi"
+
+==================== FOTOS (--foto) ====================
+Fotos da Elis ficam na pasta fotos/ (elis01 a elis20). Aparecem por cima do video numa moldura
+com a cor do canal e o nome ELIS JUSTI embaixo:
+  --foto elis05@0.5-4     (entra em 0,5s e sai em 4s; pode repetir com outras fotos)
+
+--enquadrar 0.1   (fofoca) sobe o recorte do video (0=topo, 0.5=meio). Use se o rosto ainda sair cortado.
+
+==================== FILTROS DE QUALIDADE (JOTA EXPLICA) ====================
+No canal jotaexplica o editor aplica sozinho:
+  APRIMORAR (tira ruido), QUALIDADE 4K (nitidez de detalhe) e VIVIDO (cor e contraste).
+O video continua em 1080x1920 (padrao das redes). Pra desligar: --sem-aprimorar
+
+==================== NEXORA CLIPS (TEMA ROXO, GAMES) ====================
+Canal nexora: mesmo modelo do Jota Explica, com detalhes ROXOS, selo 🎮 GAMES,
+legenda Salto de Cor roxa e filtros aprimorar + qualidade 4K + vivido.
+  python ~/editor_memes/editar.py ultimo nexora "HEADLINE COM *PALAVRA* ROXA 😱" --fonte "gameplay" --card "TEXTO 🎮@5"
+  (modelo antigo de filme: acrescente --modelo filme)
+
+==================== PAINEL (INTERFACE ESTILO CAPCUT) ====================
+  python ~/editor_memes/painel.py
+Abre sozinho no navegador (ou digite http://localhost:8080 no Chrome).
+Escolha o video, marque inicio/fim no player, escolha o canal, escreva a headline,
+adicione cards/foto e toque em GERAR. O video vai pra Memes_Prontos.
+Deixe o Termux aberto enquanto usa. Para fechar: CTRL + C no Termux.
+
+PAINEL - ABAS NOVAS:
+  ✂️ Editar   video, trecho, canal, textos, cards, foto
+  🎨 Filtros  aprimorar, 4K, vivido, brilho, contraste, quente, frio, cinema, P&B, vintage, vinheta, granulado
+  🎵 Audio    musica de fundo (mp3/m4a da Download ou Music), volume, abaixar na fala
+  🪞 Espelhar inverte a imagem
+  📋 Fila     ➕ Fila adiciona o corte; os videos sao feitos um depois do outro

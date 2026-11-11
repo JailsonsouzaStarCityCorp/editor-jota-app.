@@ -1,0 +1,10 @@
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+__pycache__/
+.painel_tmp/
+editor/musicas/*
+!editor/musicas/.manter
+editor/fotos/*
+!editor/fotos/.manter

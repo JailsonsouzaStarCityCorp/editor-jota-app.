@@ -1,0 +1,42 @@
+<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{margin:0;background:#0d0d10;color:#f2f2f5;font:15px/1.45 system-ui,Roboto,sans-serif;padding:18px 16px 40px}
+h1{font-size:22px;margin:4px 0 4px}p{color:#b9b9c3}.c{background:#17171c;border-radius:14px;padding:14px;margin:12px 0}
+.c h2{font-size:15px;margin:0 0 6px;display:flex;gap:8px;align-items:center}.n{background:#ffc400;color:#111;border-radius:50%;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;font-size:13px;flex:0 0 auto}
+.ok .n{background:#2ecc71}button{width:100%;border:0;border-radius:10px;padding:13px;margin-top:8px;font-size:15px;font-weight:700;background:#22222a;color:#f2f2f5}
+button.p{background:#ffc400;color:#111}code{display:block;background:#000;border-radius:8px;padding:10px;font-size:12px;word-break:break-all;color:#ddd;margin-top:8px}
+.hide{display:none}.aviso{background:#3a2a00;color:#ffd46b;border-radius:10px;padding:10px;font-size:13px}
+</style></head><body>
+<h1>🎬 Editor Jota</h1>
+<p id="topo">O app usa o Termux por trás pra fazer os vídeos. Faça os passos abaixo uma vez só.</p>
+<div class="aviso hide" id="naoligou">O editor não ligou. Confira os passos 2 e 3 e toque em "Tentar de novo".</div>
+
+<div class="c" id="s1"><h2><span class="n">1</span>Instalar o Termux</h2>
+<p>Baixe pela <b>F-Droid</b> (a versão da Play Store não funciona).</p>
+<button onclick="Android.link('https://f-droid.org/packages/com.termux/')">Baixar Termux (F-Droid)</button></div>
+
+<div class="c" id="s2"><h2><span class="n">2</span>Instalar o editor no Termux</h2>
+<p>Copie o comando, abra o Termux, cole e aperte Enter. Ele instala tudo e libera o app. Na primeira vez o Termux pede acesso aos arquivos: toque em <b>Permitir</b>.</p>
+<code id="cmd"></code>
+<button class="p" onclick="Android.copiar(Android.instalar());Android.abrirTermux()">📋 Copiar e abrir o Termux</button></div>
+
+<div class="c" id="s3"><h2><span class="n">3</span>Permitir o app ligar o editor</h2>
+<p>Toque e escolha <b>Permitir</b>.</p>
+<button onclick="Android.pedirPermissao()">Dar permissão</button></div>
+
+<button class="p" onclick="Android.tentar()">▶ Tentar de novo / Abrir o editor</button>
+
+<div class="c hide" id="cfg"><h2>⚙️ Configurações</h2>
+<button onclick="Android.atualizar()">⬇ Atualizar o editor (baixa a versão nova)</button>
+<button onclick="Android.reiniciar()">↻ Reiniciar o editor</button>
+<button onclick="Android.link('https://github.com/JailsonsouzaStarCityCorp/editor-jota-app./releases/latest')">📦 Baixar a versão nova do app</button>
+<button onclick="Android.voltar()">← Voltar pro editor</button></div>
+
+<script>
+const m=location.hash.slice(1);document.getElementById('cmd').textContent=Android.instalar();
+const t=Android.termux(),p=Android.permissao();
+if(t)document.getElementById('s1').classList.add('ok');if(p)document.getElementById('s3').classList.add('ok');
+if(m=='naoligou')document.getElementById('naoligou').classList.remove('hide');
+if(m=='config'){document.getElementById('cfg').classList.remove('hide');document.getElementById('topo').textContent='Configurações do app. Os passos abaixo só são necessários se algo parar de funcionar.';
+ document.body.insertBefore(document.getElementById('cfg'),document.getElementById('naoligou'))}
+</script></body></html>
