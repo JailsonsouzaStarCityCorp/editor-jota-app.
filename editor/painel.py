@@ -779,7 +779,21 @@ function foto(f){S.foto=f;carregar();salvar()}function tirarFoto(){S.foto='';car
 async function sugerirG(){if(!S.video){toast('Escolha um vídeo');return}$('sug').innerHTML='<div class="hint">Analisando o áudio… (vídeo longo demora um pouco)</div>';
  const r=await (await fetch('/api/sugerir?f='+encodeURIComponent(S.video)+'&dur='+$('durSug').value)).json();
  if(r.erro||!r.length){$('sug').innerHTML='<div class="hint">Não achei trechos.</div>';return}
- $('sug').innerHTML=r.map((o,i)=>`<div class="fj" onclick="usarSug(${o.inicio},${o.fim},${o.pico})"><div class="t"><b>${i?'':'🔥 '}${fmt(o.inicio)} → ${fmt(o.fim)}</b><span class="st pronto">força ${o.nota}</span></div><div class="hint">pico em ${fmt(o.pico)} · toque pra usar</div></div>`).join('')}
+ SUG=r;
+ $('sug').innerHTML=r.map((o,i)=>`<div class="fj" style="display:flex;gap:10px;align-items:center"><input type="checkbox" class="selSug" data-i="${i}" style="width:24px;height:24px;flex:none" onchange="contarSel()">
+ <div style="flex:1" onclick="usarSug(${o.inicio},${o.fim},${o.pico})"><div class="t"><b>${i?'':'🔥 '}${fmt(o.inicio)} → ${fmt(o.fim)}</b><span class="st pronto">força ${o.nota}</span></div><div class="hint">pico em ${fmt(o.pico)} · toque pra ver</div></div></div>`).join('')+
+ `<div class="row" style="margin-top:8px"><button class="sm" onclick="marcarTodos()">☑ Marcar todos</button><button class="pri" id="btSel" onclick="gerarSelecionados()">➕ Pôr os marcados na fila</button></div>
+ <div class="tog"><div>Numerar as partes<small>Parte 1, Parte 2… na ordem do vídeo</small></div><label class="sw"><input type="checkbox" id="numSug"><i></i></label></div>`;contarSel()}
+let SUG=[];
+function selecionados(){return [...document.querySelectorAll('.selSug')].filter(c=>c.checked).map(c=>SUG[+c.dataset.i]).sort((a,b)=>a.inicio-b.inicio)}
+function contarSel(){const n=selecionados().length;if($('btSel'))$('btSel').textContent=n?`➕ Pôr ${n} na fila`:'➕ Pôr os marcados na fila'}
+function marcarTodos(){const cs=[...document.querySelectorAll('.selSug')],todos=cs.every(c=>c.checked);cs.forEach(c=>c.checked=!todos);contarSel()}
+async function gerarSelecionados(){const L=selecionados();if(!L.length){toast('Marque os trechos que quer cortar');return}if(!ok())return;
+ const num=$('numSug').checked;let n=0;
+ for(let k=0;k<L.length;k++){const p=dados();p.inicio=L[k].inicio;p.fim=L[k].fim;
+  if(num){if(tipo()=='fofoca')p.headline=(p.headline?p.headline+' | ':'')+'PARTE '+(k+1);else p.parte='Parte '+(k+1)}
+  const r=await (await fetch('/api/render',{method:'POST',body:JSON.stringify(p)})).json();if(r.erro){toast('Trecho '+(k+1)+': '+r.erro);break}n++}
+ if(n){toast(n+' corte(s) na fila ✔');aba('fila')}}
 function usarSug(a,b,p){$('inicio').value=a.toFixed(1);$('fim').value=b.toFixed(1);v.currentTime=p;desenhar();cmd();toast('Trecho marcado')}
 /* cores da legenda */
 const CORES=[['','Padrão'],['ffd400','Amarelo'],['39ff14','Verde'],['00e5ff','Azul'],['a855ff','Roxo'],['ff3b3b','Vermelho'],['ff4fd8','Rosa'],['ffffff','Branco']];
