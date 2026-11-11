@@ -310,11 +310,11 @@ def main():
     ap.add_argument("--rodape", default="Já segue aí pra não perder os próximos 🤣🤣",
                     help="texto de baixo (use \"\" para tirar)")
     ap.add_argument("--fundo-liso", action="store_true", help="fundo branco 100%% liso (pode ser marcado como borda)")
-    ap.add_argument("--modelo", default=None, choices=["padrao", "meiatela", "filme", "fofoca"],
+    ap.add_argument("--modelo", default=None, choices=["padrao", "meiatela", "filme", "fofoca", "colagem"],
                     help="padrao = template branco | meiatela = imagem em cima + faixa vermelha + video embaixo")
     ap.add_argument("--imagem", help="(meiatela) imagem de cima: caminho, ou 'ultima' = foto mais nova da Download. "
                                      "Sem isso, usa um quadro do proprio video")
-    ap.add_argument("--cor-faixa", default="e50914", help="(meiatela) cor da faixa em hex. Padrao vermelho")
+    ap.add_argument("--cor-faixa", default="", help="cor da faixa em hex (meiatela: vermelho; colagem: rosa)")
     ap.add_argument("--legenda", action="store_true", help="legenda animada automatica (precisa do whisper.cpp)")
     ap.add_argument("--legenda-cor", default="", help="cor da palavra destacada (hex). Padrao amarelo")
     ap.add_argument("--legenda-demo", action="store_true", help=argparse.SUPPRESS)
@@ -336,8 +336,14 @@ def main():
     ap.add_argument("--sem-aprimorar", action="store_true", help="(fofoca) desliga os filtros aprimorar + qualidade 4K + vivido")
     ap.add_argument("--logo-extra", default="", help="(fofoca) logo de campanha no lugar do selo, ex: elisjusti")
     ap.add_argument("--sem-legenda", action="store_true", help="(fofoca) nao faz a legenda automatica")
+    ap.add_argument("--titulo", default="", help="(colagem) titulo escrito em cima das imagens")
+    ap.add_argument("--img1", default="", help="(colagem) imagem da esquerda (nome da pasta fotos/ ou caminho)")
+    ap.add_argument("--img2", default="", help="(colagem) imagem da direita")
+    ap.add_argument("--cor-titulo", default="4fe3ff", help="(colagem) cor do titulo, ex: 4fe3ff")
     ap.add_argument("--parte", default="", help="(filme) etiqueta embaixo do video, ex: \"Parte 3\"")
     a = ap.parse_args()
+    if not a.cor_faixa:
+        a.cor_faixa = "ff4fb8" if a.modelo == "colagem" else "e50914"
 
     video = achar_ultimo() if a.video == "ultimo" else os.path.expanduser(a.video)
     if not os.path.exists(video):
@@ -386,7 +392,7 @@ def main():
 
     if a.sem_corte_auto:
         cx, cy, cw, ch = 0, 0, vw, vh
-    elif a.modelo == "fofoca":
+    elif a.modelo in ("fofoca", "colagem"):
         cx, cy, cw, ch = tirar_faixas(video, vw, vh, dur)
     else:
         print("Detectando a cena...")
@@ -461,10 +467,10 @@ def main():
         return meia_tela_pro(a, video, nome, dur, tem_audio, (cx, cy, cw, ch), cor, ini, tmpdir)
     global TEMA
     TEMA = TEMAS.get(a.template, TEMAS["padrao"])
-    if a.modelo == "fofoca" and not a.sem_legenda and not a.previa and (a.legenda or all(achar_whisper())):
+    if a.modelo in ("fofoca", "colagem") and not a.sem_legenda and not a.previa and (a.legenda or all(achar_whisper())):
         a.legenda = True
     if a.legenda or a.legenda_demo:
-        y_leg = {"padrao": 1470, "meiatela": 1690, "filme": 1370, "fofoca": 1400}[a.modelo]
+        y_leg = {"padrao": 1470, "meiatela": 1690, "filme": 1370, "fofoca": 1400, "colagem": 1660}[a.modelo]
         if a.legenda_demo:
             pal = demo_palavras(dur_final)
         else:
@@ -472,7 +478,7 @@ def main():
             pal = [(max(0.0, (t0 - ini) / vel), max(0.0, (t1 - ini) / vel), w) for t0, t1, w in pal]
         if pal:
             ass = os.path.join(tmpdir, "legenda.ass")
-            if a.modelo == "fofoca":
+            if a.modelo in ("fofoca", "colagem"):
                 gerar_ass_salto(pal, ass, y_leg, a.legenda_cor)
             else:
                 gerar_ass(pal, ass, y_leg, a.legenda_cor or "ffe600")
@@ -481,7 +487,7 @@ def main():
         else:
             print("Legenda: nenhuma fala encontrada, seguindo sem legenda")
 
-    if a.modelo == "fofoca":
+    if a.modelo in ("fofoca", "colagem"):
         return fofoca(a, video, nome, dur, dur_final, tem_audio, (cx, cy, cw, ch),
                       vel, ini, cor, vol, fase, espelho, tmpdir)
     if a.modelo == "filme":
@@ -1580,12 +1586,128 @@ def gerar_ass_salto(palavras, saida, y, cor=""):
     open(saida, "w", encoding="utf-8").write("\n".join(L) + "\n")
 
 
+
+# ---------------------------------------------------------------- MODELO COLAGEM
+# 2 imagens em cima + titulo escrito a mao + faixa colorida com a headline + video embaixo
+def _cor_hex(h, padrao):
+    h = (h or "").strip().lstrip("#")
+    try:
+        return tuple(int(h[k:k + 2], 16) for k in (0, 2, 4))
+    except Exception:
+        return padrao
+
+
+def _achar_img(nome):
+    if not nome:
+        return None
+    if os.path.exists(nome):
+        return nome
+    for ext in (".jpg", ".jpeg", ".png", ".webp", ""):
+        c = os.path.join(PASTA, "fotos", nome + ext)
+        if os.path.exists(c):
+            return c
+    print(f"AVISO: imagem {nome} nao encontrada")
+    return None
+
+
+def _cobrir(caminho, w, h):
+    im = Image.open(caminho).convert("RGB")
+    r = max(w / im.width, h / im.height)
+    im = im.resize((max(w, round(im.width * r)), max(h, round(im.height * r))), Image.LANCZOS)
+    x = (im.width - w) // 2
+    y = max(0, int((im.height - h) * 0.25))   # rosto costuma ficar mais em cima
+    return im.crop((x, y, x + w, y + h))
+
+
+def camada_colagem(a, P):
+    from PIL import ImageFilter
+    TOPO = 760
+    cf = _cor_hex(a.cor_faixa, (255, 79, 184))
+    ct = _cor_hex(a.cor_titulo, (79, 227, 255))
+    base = Image.new("RGB", (W, H), (12, 12, 14))
+    imgs = [c for c in (_achar_img(a.img1), _achar_img(a.img2)) if c]
+    if len(imgs) == 1:
+        base.paste(_cobrir(imgs[0], W, TOPO), (0, 0))
+    elif len(imgs) == 2:
+        base.paste(_cobrir(imgs[0], W // 2, TOPO), (0, 0))
+        base.paste(_cobrir(imgs[1], W // 2, TOPO), (W // 2, 0))
+    else:   # sem imagem: degrade na cor da faixa
+        for y in range(TOPO):
+            k = 0.18 + 0.25 * (1 - y / TOPO)
+            ImageDraw.Draw(base).line([(0, y), (W, y)], fill=tuple(int(c * k) for c in cf))
+    d = ImageDraw.Draw(base)
+    # titulo escrito a mao em cima das imagens
+    if a.titulo:
+        fp = os.path.join(FONTES, "Pacifico-Regular.ttf")
+        tam = 140
+        while tam > 60:
+            f = ImageFont.truetype(fp, tam)
+            if d.textlength(a.titulo, font=f) <= W - 80:
+                break
+            tam -= 6
+        sombra = Image.new("RGBA", (W, 300), (0, 0, 0, 0))
+        ImageDraw.Draw(sombra).text((44, 24), a.titulo, font=f, fill=(0, 0, 0, 170))
+        base.paste(sombra.filter(ImageFilter.GaussianBlur(6)), (0, 0), sombra.filter(ImageFilter.GaussianBlur(6)))
+        d.text((38, 14), a.titulo, font=f, fill=ct, stroke_width=7, stroke_fill=(255, 255, 255))
+    # faixa colorida com a headline (palavra entre *asteriscos* sai em amarelo)
+    texto = re.sub(r"\s+", " ", (a.headline or "").replace("|", " ")).strip()
+    linhas, fonte = [], None
+    if texto:
+        fa = os.path.join(FONTES, "Anton-Regular.ttf")
+        palavras = texto.upper().split()
+        for tam in range(66, 34, -4):
+            fonte = ImageFont.truetype(fa, tam)
+            linhas, atual = [], ""
+            for p_ in palavras:
+                t = (atual + " " + p_).strip()
+                if d.textlength(t.replace("*", ""), font=fonte) <= W - 110:
+                    atual = t
+                else:
+                    linhas.append(atual); atual = p_
+            linhas.append(atual)
+            if len(linhas) <= 3:
+                break
+    lh = int(fonte.size * 1.16) if fonte else 0
+    faixa_h = (len(linhas) * lh + 34) if linhas else 26
+    camada = Image.new("RGBA", (W, faixa_h), cf + (255,))
+    dc = ImageDraw.Draw(camada)
+    y = 17
+    for ln in linhas:
+        partes = re.split(r"(\*[^*]+\*)", ln)
+        larg = sum(dc.textlength(x.replace("*", "") + "", font=fonte) for x in partes)
+        x = (W - larg) / 2
+        for x_ in partes:
+            if not x_:
+                continue
+            dest = x_.startswith("*")
+            t = x_.strip("*")
+            dc.text((x, y), t, font=fonte, fill=(255, 212, 0) if dest else (255, 255, 255),
+                    stroke_width=5, stroke_fill=(0, 0, 0))
+            x += dc.textlength(t, font=fonte)
+        y += lh
+    # inclina um pouco o texto da faixa (letra de impacto)
+    camada = camada.transform(camada.size, Image.AFFINE, (1, 0.12, -faixa_h * 0.06, 0, 1, 0), Image.BICUBIC,
+                              fillcolor=cf + (255,))
+    base.paste(camada.convert("RGB"), (0, TOPO))
+    vy = TOPO + faixa_h
+    vh = (H - vy) // 2 * 2
+    # moldura extra (o quadro balanca um pouco no anti-duplicidade)
+    tela = base.resize((W + 2 * P, H + 2 * P), Image.LANCZOS) if P else base.copy()
+    tela.paste(base, (P, P))
+    return tela, vy, vh
+
 def fofoca(a, video, nome, dur, dur_final, tem_audio, cena, vel, ini, cor, vol, fase, espelho, tmpdir):
     cx, cy, cw, ch = cena
     PADD = 0 if a.estatico else PAD
     fundo = os.path.join(tmpdir, "fofoca.png")
-    camada_fofoca(a, PADD).save(fundo)
-    esc = max(W / cw, FF_VH / ch) * 1.01
+    VY, VH, LINHA, COR_BARRA = FF_VY, FF_VH, FF_LINHA2, (TEMA["cor"] if a.template in TEMAS else (224, 24, 24))
+    if a.modelo == "colagem":
+        img, VY, VH = camada_colagem(a, PADD)
+        img.save(fundo)
+        LINHA, COR_BARRA = H - 12, _cor_hex(a.cor_faixa, (255, 79, 184))
+    else:
+        camada_fofoca(a, PADD).save(fundo)
+    esc = max(W / cw, VH / ch) * 1.01
     sw, sh = int(cw * esc) // 2 * 2 + 2, int(ch * esc) // 2 * 2 + 2
     zoom_f = expr_zoom(sw, sh, min(a.zoom, 0.05), a.intervalo, fase)
     # video em pe: rosto fica em cima, entao recorta mais perto do topo
@@ -1599,10 +1721,10 @@ def fofoca(a, video, nome, dur, dur_final, tem_audio, cena, vel, ini, cor, vol, 
     # "QUALIDADE 4K": nitidez de detalhe depois de ajustar o tamanho (efeito de imagem mais definida)
     detalhe = "cas=0.6,unsharp=3:3:0.45:3:3:0," if aprim else ""
     filtro = (f"[1:v]setpts=(PTS-STARTPTS)/{vel},crop={cw}:{ch}:{cx}:{cy},{espelho}{cor}{aprim}fps=30,"
-              f"scale={sw}:{sh}:flags=lanczos,{zoom_f}crop={W}:{FF_VH}:'(iw-{W})/2':'(ih-{FF_VH})*{fy}',{detalhe}setsar=1[v];"
-              f"[0:v][v]overlay={PADD}:{FF_VY + PADD}:shortest=1[b0];"
-              f"color=c=0x{"%02X%02X%02X" % (TEMA["cor"] if a.template in TEMAS else (224, 24, 24))}:s={W}x10:r=30[pb];"
-              f"[b0][pb]overlay=x='{PADD}-{W}+{W}*t/{dur_final:.3f}':y={FF_LINHA2 + PADD}:shortest=1[b1];")
+              f"scale={sw}:{sh}:flags=lanczos,{zoom_f}crop={W}:{VH}:'(iw-{W})/2':'(ih-{VH})*{fy}',{detalhe}setsar=1[v];"
+              f"[0:v][v]overlay={PADD}:{VY + PADD}:shortest=1[b0];"
+              f"color=c=0x{'%02X%02X%02X' % COR_BARRA}:s={W}x10:r=30[pb];"
+              f"[b0][pb]overlay=x='{PADD}-{W}+{W}*t/{dur_final:.3f}':y={LINHA + PADD}:shortest=1[b1];")
     ultimo = "b1"
     # cards verdes:  --card "R$ 190 MIL 💸@8.5"  (aparece em 8.5s por 3s)  ou  "texto@8.5-12"
     for i, c in enumerate(a.card or []):
@@ -1615,7 +1737,7 @@ def fofoca(a, video, nome, dur, dur_final, tem_audio, cena, vel, ini, cor, vol, 
         cw_, ch_ = card_png(txt, png)
         entradas += ["-loop", "1", "-i", png]
         xc = min(W - cw_ - 30, max(30, int(W * 0.62 - cw_ / 2)))
-        yb = FF_VY + 40
+        yb = VY + 40
         filtro += (f"[{ultimo}][{2 + i}:v]overlay=x={xc + PADD}:y='{yb + PADD}-40*max(0,1-(t-{t0})/0.18)'"
                    f":enable='between(t,{t0},{t1})':shortest=1[c{i}];")
         ultimo = f"c{i}"
@@ -1633,7 +1755,7 @@ def fofoca(a, video, nome, dur, dur_final, tem_audio, cena, vel, ini, cor, vol, 
         fw, fh = foto_png(cam, png, "ELIS JUSTI" if os.path.basename(cam).startswith("elis") else "")
         idx = sum(1 for x in entradas if x == "-i")
         entradas += ["-loop", "1", "-i", png]
-        xf = W - fw - 30; yf = FF_VY + (FF_VH - fh) // 2
+        xf = W - fw - 30; yf = VY + (VH - fh) // 2
         filtro += (f"[{ultimo}][{idx}:v]overlay=x='{xf + PADD}+600*max(0,1-(t-{t0})/0.25)':y={yf + PADD}"
                    f":enable='between(t,{t0},{t1})':shortest=1[f{i}];")
         ultimo = f"f{i}"
@@ -1654,7 +1776,7 @@ def fofoca(a, video, nome, dur, dur_final, tem_audio, cena, vel, ini, cor, vol, 
               + entradas[8:] + ["-filter_complex", filtro, "-map", "[out]", "-frames:v", "1", prev])
         print(f"Previa salva em: {prev}")
         return
-    print("Renderizando fofoca... (pode levar alguns minutos)")
+    print(f"Renderizando {a.modelo}... (pode levar alguns minutos)")
     cmd = ["ffmpeg", "-v", "error", "-stats", "-y"] + entradas + ["-filter_complex", filtro, "-map", "[out]"]
     if tem_audio:
         cmd += ["-map", "[a]", "-c:a", "aac", "-b:a", "160k"]

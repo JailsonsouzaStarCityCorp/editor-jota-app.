@@ -142,7 +142,8 @@ def montar_args(p, saida, previa=False, video=None):
     for f in p.get("fotos", []):
         if f.get("nome"):
             args += ["--foto", f'{f["nome"]}@{float(f["t0"]):.1f}-{float(f["t1"]):.1f}']
-    txt = {"fonte": "--fonte", "rodape": "--rodape", "selo": "--selo", "parte": "--parte", "logo_extra": "--logo-extra"}
+    txt = {"fonte": "--fonte", "rodape": "--rodape", "selo": "--selo", "parte": "--parte", "logo_extra": "--logo-extra",
+           "titulo": "--titulo", "img1": "--img1", "img2": "--img2", "cor_faixa": "--cor-faixa", "cor_titulo": "--cor-titulo"}
     for k, flag in txt.items():
         if p.get(k):
             args += [flag, str(p[k])]
@@ -503,6 +504,20 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         u = urllib.parse.urlparse(self.path)
+        if u.path == "/api/upload_img":  # imagem da colagem: vai pra pasta fotos/ (convertida pra jpg)
+            q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
+            corpo = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            nome = re.sub(r"[^a-zA-Z0-9_-]+", "_", os.path.splitext(os.path.basename(q.get("nome", "imagem")))[0])[:40] or "imagem"
+            try:
+                from PIL import Image
+                import io
+                os.makedirs(os.path.join(PASTA, "fotos"), exist_ok=True)
+                im = Image.open(io.BytesIO(corpo)).convert("RGB")
+                im.thumbnail((1600, 1600))
+                im.save(os.path.join(PASTA, "fotos", nome + ".jpg"), quality=92)
+            except Exception as e:  # noqa: BLE001
+                return self._json({"erro": "Imagem invalida: " + str(e)}, 400)
+            return self._json({"nome": nome})
         if u.path == "/api/upload":  # recebe a musica escolhida no celular
             q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
             nome = re.sub(r'[\\/:*?"<>|]+', "_", os.path.basename(q.get("nome", "musica.mp3")))
@@ -654,6 +669,15 @@ video.esp{transform:scaleX(-1)}
 <div class="card" id="boxCards"><h3>5 · Cards</h3><div id="cards"></div>
  <button class="sm" onclick="addCard()">＋ Card no tempo atual</button>
  <div class="hint">O tempo do card conta a partir do início do trecho.</div></div>
+<div class="card hide" id="boxColagem"><h3>Colagem · imagens e cores</h3>
+ <label>Título em cima (letra de mão)</label><input id="titulo" placeholder="Ex.: Ana Castela">
+ <div class="row"><div><label>Imagem da esquerda</label><select id="img1"></select></div><div><label>Imagem da direita</label><select id="img2"></select></div></div>
+ <input type="file" id="upImg" accept="image/*" class="hide" onchange="enviarImg(this)">
+ <button class="sm" style="margin-top:8px" onclick="$('upImg').click()">📂 Enviar imagem do celular</button>
+ <div class="row" style="margin-top:6px"><div><label>Cor da faixa da headline</label><input type="color" id="cor_faixa" value="#ff4fb8" style="height:44px;padding:2px"></div>
+ <div><label>Cor do título</label><input type="color" id="cor_titulo" value="#4fe3ff" style="height:44px;padding:2px"></div></div>
+ <div class="chips" id="coresFaixa" style="margin-top:8px"></div>
+ <div class="hint">A headline vai na faixa colorida. Palavra entre *asteriscos* sai em amarelo.</div></div>
 <div class="card" id="boxFotos"><h3>6 · Foto</h3><div class="fotos" id="fotos"></div>
  <div class="it"><input class="n" id="fotoT0" value="0.3"><span>até</span><input class="n" id="fotoT1" value="3.5"><button class="sm" onclick="tirarFoto()">Sem foto</button></div>
  <label>Logo extra (campanha)</label>
@@ -668,7 +692,7 @@ video.esp{transform:scaleX(-1)}
   <div class="row"><div><label>Cortar topo (px)</label><input id="cortar_topo" inputmode="numeric" placeholder="0"></div>
   <div><label>Cortar baixo (px)</label><input id="cortar_baixo" inputmode="numeric" placeholder="0"></div></div>
   <div class="row"><div><label>Enquadrar (0 topo · 0.5 meio)</label><input id="enquadrar" placeholder="auto"></div>
-  <div><label>Modelo</label><select id="modelo"><option value="">Padrão do canal</option><option>fofoca</option><option>filme</option><option>meiatela</option><option>padrao</option></select></div></div>
+  <div><label>Modelo</label><select id="modelo"><option value="">Padrão do canal</option><option>fofoca</option><option>filme</option><option>meiatela</option><option>padrao</option><option value="colagem">colagem</option></select></div></div>
   <label>Nome do arquivo final</label><input id="nome_saida" placeholder="automático">
  </details></div>
 <div class="card"><h3>8 · Campanha e postagem</h3>
@@ -751,7 +775,7 @@ async function carregar(){setTimeout(()=>carregarProntos().catch(()=>{}),800);
  D=await (await fetch('/api/tudo')).json();$('pasta').textContent=D.pasta.split('/').slice(-1)[0];
  $('vids').innerHTML=D.videos.map(x=>`<div class="vid${x.nome==S.video?' on':''}" onclick="escolher('${encodeURIComponent(x.nome)}')"><span>${x.nome}</span><small>${x.mb} MB · ${x.quando}</small></div>`).join('')||'<div class="hint">Nenhum vídeo na pasta Download.</div>';
  $('canais').innerHTML=D.canais.map(c=>`<div class="chip${c.id==S.canal?' on':''}" onclick="canal('${c.id}')">${c.logo?`<img src="${c.logo}">`:'<img>'}<span>${c.nome}</span><small>${c.tipo}</small></div>`).join('');
- $('fotos').innerHTML=D.fotos.map(f=>`<img src="/foto?f=${f}" class="${f==S.foto?'on':''}" onclick="foto('${f}')">`).join('');
+ $('fotos').innerHTML=D.fotos.map(f=>`<img src="/foto?f=${f}" class="${f==S.foto?'on':''}" onclick="foto('${f}')">`).join('');rColagem();
  $('prontos').innerHTML=D.prontos.map(n=>`<a href="/saida?f=${encodeURIComponent(n)}" target="_blank">🎬 ${n}</a>`).join('')||'<div class="hint">Nada ainda.</div>';
  rFiltros();rAudios();ajustarCanal();cmd()}
 function escolher(n){S.video=decodeURIComponent(n);v.src='/video?f='+n;$('inicio').value='';$('fim').value='';carregar();salvar()}
@@ -759,7 +783,7 @@ function canal(id){S.canal=id;carregar();salvar()}
 function tipo(){const c=(D.canais||[]).find(c=>c.id==S.canal);const m=$('modelo').value;return m?(m=='padrao'?'meme':m=='meiatela'?'meia tela':m):(c?c.tipo:'')}
 function ajustarCanal(){const t=tipo(),ff=t=='fofoca';
  ['boxFonte','boxSelo','boxCards','boxFotos'].forEach(i=>$(i).classList.toggle('hide',!ff));
- ['boxRodape','boxParte'].forEach(i=>$(i).classList.toggle('hide',ff));$('tipoCanal').textContent=S.canal?('Modelo: '+t):'Escolha o canal'}
+ ['boxRodape','boxParte'].forEach(i=>$(i).classList.toggle('hide',ff||t=='colagem'));$('boxColagem').classList.toggle('hide',t!='colagem');$('tipoCanal').textContent=S.canal?('Modelo: '+t):'Escolha o canal'}
 function marcar(k){$(k).value=v.currentTime.toFixed(1);desenhar();cmd()}
 function limparTrecho(){$('inicio').value='';$('fim').value='';desenhar();cmd()}
 function tocarTrecho(){v.currentTime=seg($('inicio').value);v.play()}
@@ -774,7 +798,13 @@ v.addEventListener('loadedmetadata',desenhar);
 $('tl').addEventListener('pointerdown',e=>{const r=$('tl').getBoundingClientRect();if(v.duration)v.currentTime=(e.clientX-r.left)/r.width*v.duration});
 function addCard(){const t=Math.max(0,v.currentTime-seg($('inicio').value));S.cards.push({texto:'',t0:t.toFixed(1),t1:(t+3).toFixed(1)});rCards()}
 function rCards(){$('cards').innerHTML=S.cards.map((c,i)=>`<div class="it"><input placeholder="TEXTO 🔥" value="${c.texto.replace(/"/g,'&quot;')}" oninput="S.cards[${i}].texto=this.value;cmd()"><input class="n" value="${c.t0}" oninput="S.cards[${i}].t0=this.value;desenhar();cmd()"><input class="n" value="${c.t1}" oninput="S.cards[${i}].t1=this.value;desenhar();cmd()"><button class="sm" onclick="S.cards.splice(${i},1);rCards()">✕</button></div>`).join('');desenhar();cmd()}
-function foto(f){S.foto=f;carregar();salvar()}function tirarFoto(){S.foto='';carregar();salvar()}
+function foto(f){S.foto=f;carregar();salvar()}
+/* colagem */
+const CF=['#ff4fb8','#ffd400','#a855ff','#00c2ff','#ff3b3b','#39d353','#ff8a00','#111111'];
+function rColagem(){const f=(D.fotos||[]);['img1','img2'].forEach(k=>{const v=$(k).value;$(k).innerHTML='<option value="">Nenhuma</option>'+f.map(n=>`<option>${n}</option>`).join('');$(k).value=v});
+ $('coresFaixa').innerHTML=CF.map(c=>`<div class="chip" style="width:46px" onclick="$('cor_faixa').value='${c}';cmd()"><span style="display:block;width:30px;height:30px;border-radius:50%;background:${c};border:2px solid #fff3"></span></div>`).join('')}
+function enviarImg(inp){const f=inp.files[0];if(!f)return;fetch('/api/upload_img?nome='+encodeURIComponent(f.name),{method:'POST',body:f}).then(r=>r.json()).then(async r=>{inp.value='';if(r.erro){toast(r.erro);return}
+ await carregar();if(!$('img1').value)$('img1').value=r.nome;else $('img2').value=r.nome;cmd();toast('Imagem pronta')})}function tirarFoto(){S.foto='';carregar();salvar()}
 /* momentos fortes */
 async function sugerirG(){if(!S.video){toast('Escolha um vídeo');return}$('sug').innerHTML='<div class="hint">Analisando o áudio… (vídeo longo demora um pouco)</div>';
  const r=await (await fetch('/api/sugerir?f='+encodeURIComponent(S.video)+'&dur='+$('durSug').value)).json();
@@ -832,6 +862,7 @@ $('espelhar').addEventListener('change',()=>{const on=$('espelhar').checked;$('v
 /* dados + comando */
 function dados(){const p={video:S.video,canal:S.canal,cards:S.cards.filter(c=>c.texto),filtros:S.filtros,musica:S.musica,post_legenda:$('post').value};
  ['headline','fonte','rodape','parte','selo','logo_extra','cortar_topo','cortar_baixo','enquadrar','modelo','nome_saida'].forEach(k=>p[k]=$(k).value.trim());
+ if(tipo()=='colagem'){p.titulo=$('titulo').value.trim();p.img1=$('img1').value;p.img2=$('img2').value;p.cor_faixa=$('cor_faixa').value.slice(1);p.cor_titulo=$('cor_titulo').value.slice(1)}
  if(tipo()!='fofoca'){p.fonte='';p.selo='';p.cards=[];p.logo_extra=''}else{p.rodape='';p.parte=''}
  p.inicio=seg($('inicio').value);p.fim=seg($('fim').value);
  ['legenda','velocidade_fixa','fade','sem_unico','espelhar'].forEach(k=>p[k]=$(k).checked);p.legenda_cor=S.cor||'';
