@@ -85,6 +85,27 @@ FILTROS = {
     "granulado": ("Granulado", "noise=alls=9:allf=t"),
 }
 
+POSTS = os.path.join(PASTA, "postagens.json")   # legenda de postagem de cada video pronto
+
+def ler_posts():
+    try:
+        with open(POSTS, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def guardar_post(arquivo, texto):
+    if not texto:
+        return
+    d = ler_posts()
+    d[os.path.basename(arquivo)] = texto
+    if len(d) > 200:   # guarda so os mais recentes
+        d = dict(list(d.items())[-200:])
+    tmp = POSTS + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False)
+    os.replace(tmp, POSTS)
+
 def lista_saida():
     vs = [f for f in glob.glob(os.path.join(SAIDA, "*.mp4"))]
     vs.sort(key=os.path.getmtime, reverse=True)
@@ -353,6 +374,8 @@ def novo_job(p, previa=False):
         nome = nome or f'{p["canal"]}_{time.strftime("%d%m_%H%M%S")}_{jid[:3]}'
         arquivo = os.path.join(SAIDA, nome + ".mp4")
     montar_args(p, "x.mp4")  # valida (video existe etc.)
+    if not previa:
+        guardar_post(arquivo, (p.get("post_legenda") or "").strip())
     JOBS[jid] = {"status": "na fila", "progresso": 0, "etapa": "Na fila", "log": [], "arquivo": arquivo,
                  "previa": previa, "p": p, "nome": nome, "headline": (p.get("headline") or "")[:70],
                  "canal": p.get("canal"), "criado": time.time()}
@@ -449,7 +472,8 @@ class H(BaseHTTPRequestHandler):
                 if os.path.isdir(os.path.join(PASTA, "fotos")) else []
             self._json({"videos": lista_videos(), "canais": canais(), "fotos": fotos, "audios": lista_audios(),
                         "filtros": [{"id": k, "nome": v[0]} for k, v in FILTROS.items()],
-                        "prontos": lista_saida(), "pasta": VIDEOS})
+                        "prontos": lista_saida(), "pasta": VIDEOS,
+                        "saida_real": os.path.realpath(SAIDA), "posts": ler_posts()})
         elif u.path == "/api/job":
             if q.get("id", "") not in JOBS:
                 return self._json({"status": "erro", "log": ["job nao existe"]}, 404)
@@ -568,6 +592,8 @@ pre{white-space:pre-wrap;font-size:11px;color:var(--m);max-height:120px;overflow
 .hide{display:none}.hint{font-size:12px;color:var(--m);margin-top:6px}
 .fotos{display:flex;gap:6px;overflow-x:auto}.fotos img{width:54px;height:80px;object-fit:cover;border-radius:8px;border:2px solid transparent}.fotos img.on{border-color:var(--a)}
 .prontos a{display:block;color:var(--t);padding:8px;border-radius:8px;background:var(--p2);margin:5px 0;text-decoration:none;font-size:13px}
+.pronto{background:var(--p2);border-radius:10px;padding:8px;margin:6px 0}.pronto a{background:none;margin:0;padding:2px 0}
+.redes{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.redes button{flex:1;min-width:70px;padding:8px 6px;font-size:13px;border-radius:8px}
 details summary{cursor:pointer;color:var(--m);font-size:13px;padding:4px 0}
 #toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#333;padding:10px 16px;border-radius:20px;font-size:14px;opacity:0;transition:.3s;z-index:20}
 
@@ -704,7 +730,7 @@ video.esp{transform:scaleX(-1)}
  <div class="row"><button class="sm" onclick="limparFila()">🧹 Limpar concluídos</button></div>
  <div class="hint">Os vídeos são feitos um depois do outro. Pode continuar montando outros cortes enquanto isso. Deixe o Termux aberto.</div>
 </div>
-<div class="card"><h3>Prontos (Memes_Prontos)</h3><div class="prontos" id="prontos"></div></div>
+<div class="card"><h3>Prontos (Memes_Prontos)</h3><div class="hint">Toque na rede pra abrir o app dela com o vídeo. A legenda já vai copiada: é só colar.</div><div class="prontos" id="prontos"></div></div>
 </section>
 </div>
 
@@ -790,7 +816,7 @@ function salvarA(){if(S.musica){S.musica.inicio=seg($('musIni').value);S.musica.
 /* espelhar */
 $('espelhar').addEventListener('change',()=>{const on=$('espelhar').checked;$('v2').classList.toggle('esp',on);v.classList.toggle('esp',on);$('bE').classList.toggle('hide',!on);cmd()});
 /* dados + comando */
-function dados(){const p={video:S.video,canal:S.canal,cards:S.cards.filter(c=>c.texto),filtros:S.filtros,musica:S.musica};
+function dados(){const p={video:S.video,canal:S.canal,cards:S.cards.filter(c=>c.texto),filtros:S.filtros,musica:S.musica,post_legenda:$('post').value};
  ['headline','fonte','rodape','parte','selo','logo_extra','cortar_topo','cortar_baixo','enquadrar','modelo','nome_saida'].forEach(k=>p[k]=$(k).value.trim());
  if(tipo()!='fofoca'){p.fonte='';p.selo='';p.cards=[];p.logo_extra=''}else{p.rodape='';p.parte=''}
  p.inicio=seg($('inicio').value);p.fim=seg($('fim').value);
@@ -822,7 +848,18 @@ async function verFila(){clearTimeout(tq);const L=await (await fetch('/api/fila'
  <div class="row" style="margin-top:6px">${j.status=='pronto'?`<a href="${j.url}" target="_blank"><button class="sm">▶ Ver</button></a><a href="${j.url}&baixar=1"><button class="sm">⬇ Baixar</button></a>`:''}
  ${j.status=='rodando'||j.status=='na fila'?`<button class="sm" onclick="pararJ('${j.id}')">✕ Cancelar</button>`:`<button class="sm" onclick="remover('${j.id}')">Remover</button>`}</div></div>`).join(''):'<div class="hint">Nada na fila.</div>';
  if(pend){tq=setTimeout(verFila,1500)}else if(L.some(j=>j.status=='pronto'))carregarProntos()}
-async function carregarProntos(){const d=await (await fetch('/api/tudo')).json();$('prontos').innerHTML=d.prontos.map(n=>`<a href="/saida?f=${encodeURIComponent(n)}" target="_blank">🎬 ${n}</a>`).join('')}
+let PRONTOS={};
+async function carregarProntos(){const d=await (await fetch('/api/tudo')).json();PRONTOS={pasta:d.saida_real,posts:d.posts||{}};
+ $('prontos').innerHTML=d.prontos.map((n,i)=>`<div class="pronto"><a href="/saida?f=${encodeURIComponent(n)}" target="_blank">🎬 ${n}</a>
+ <div class="redes"><button class="sm" onclick="postar(${i},'tiktok')">TikTok</button><button class="sm" onclick="postar(${i},'instagram')">Instagram</button>
+ <button class="sm" onclick="postar(${i},'youtube')">YouTube</button><button class="sm" onclick="postar(${i},'facebook')">Facebook</button></div></div>`).join('');
+ PRONTOS.lista=d.prontos}
+/* postar: abre o app da rede com o video e deixa a legenda copiada */
+function legendaRede(txt,rede){if(rede!='tiktok')return txt;let n=0;   // TikTok: no maximo 5 hashtags
+ return txt.replace(/#[\wÀ-ú]+/g,t=>++n<=5?t:'').replace(/[ \t]+\n/g,'\n').replace(/ {2,}/g,' ').trim()}
+function postar(i,rede){const n=PRONTOS.lista[i];let txt=PRONTOS.posts[n]||$('post').value||'';txt=legendaRede(txt,rede);
+ if(!window.Android||!Android.postar){navigator.clipboard&&navigator.clipboard.writeText(txt);toast('Postar direto só funciona pelo app Editor Jota. Legenda copiada.');return}
+ const r=Android.postar(PRONTOS.pasta+'/'+n,rede,txt);toast(r||('Legenda copiada! Cole no '+({tiktok:'TikTok',instagram:'Instagram',youtube:'YouTube',facebook:'Facebook'}[rede])))}
 async function pararJ(id){await fetch('/api/parar',{method:'POST',body:JSON.stringify({id})});verFila()}
 async function remover(id){await fetch('/api/remover',{method:'POST',body:JSON.stringify({id})});verFila()}
 async function limparFila(){await fetch('/api/remover',{method:'POST',body:JSON.stringify({limpar:1})});verFila()}

@@ -6,6 +6,9 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.database.Cursor;
+import android.media.MediaScannerConnection;
+import android.provider.MediaStore;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
@@ -22,6 +25,9 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Toast;
 
+import java.io.File;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.net.HttpURLConnection;
 import java.net.URL;
 
@@ -196,7 +202,87 @@ public class MainActivity extends Activity {
     }
 
     // ------------------------------------------------------------ ponte com o HTML
+    // ------------------------------------------------------------ postar nas redes
+    static final String[][] REDES = {
+            {"tiktok", "com.zhiliaoapp.musically", "com.ss.android.ugc.trill"},
+            {"instagram", "com.instagram.android"},
+            {"youtube", "com.google.android.youtube"},
+            {"facebook", "com.facebook.katana", "com.facebook.lite"},
+    };
+
+    boolean podeLerVideos() {
+        String p = Build.VERSION.SDK_INT >= 33 ? "android.permission.READ_MEDIA_VIDEO" : "android.permission.READ_EXTERNAL_STORAGE";
+        if (checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED) return true;
+        runOnUiThread(() -> requestPermissions(new String[]{p}, 41));
+        return false;
+    }
+
+    /** endereco do video na galeria (content://...), pra outro app conseguir abrir */
+    Uri uriDoVideo(String caminho) {
+        String[] col = {MediaStore.Video.Media._ID};
+        for (int tentativa = 0; tentativa < 2; tentativa++) {
+            try (Cursor c = getContentResolver().query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, col,
+                    MediaStore.Video.Media.DATA + "=?", new String[]{caminho}, null)) {
+                if (c != null && c.moveToFirst()) {
+                    return Uri.withAppendedPath(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, String.valueOf(c.getLong(0)));
+                }
+            } catch (Exception ignored) {
+            }
+            // ainda nao esta na galeria: pede pro Android indexar e tenta de novo
+            CountDownLatch pronto = new CountDownLatch(1);
+            final Uri[] achado = {null};
+            MediaScannerConnection.scanFile(this, new String[]{caminho}, new String[]{"video/mp4"}, (p, uri) -> {
+                achado[0] = uri;
+                pronto.countDown();
+            });
+            try {
+                pronto.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException ignored) {
+            }
+            if (achado[0] != null) return achado[0];
+        }
+        return null;
+    }
+
+    String postar(String caminho, String rede, String legenda) {
+        if (!new File(caminho).exists()) return "Não achei o vídeo: " + caminho;
+        if (!podeLerVideos()) return "Permita o acesso aos vídeos e toque de novo.";
+        String pacote = null, nome = rede;
+        for (String[] r : REDES) {
+            if (!r[0].equals(rede)) continue;
+            for (int i = 1; i < r.length; i++) {
+                if (getPackageManager().getLaunchIntentForPackage(r[i]) != null) { pacote = r[i]; break; }
+            }
+        }
+        nome = rede.equals("tiktok") ? "TikTok" : rede.equals("instagram") ? "Instagram"
+                : rede.equals("youtube") ? "YouTube" : "Facebook";
+        if (pacote == null) return "O " + nome + " não está instalado neste celular.";
+        Uri uri = uriDoVideo(caminho);
+        if (uri == null) return "O vídeo ainda não apareceu na galeria. Espere uns segundos e tente de novo.";
+        final String pac = pacote;
+        runOnUiThread(() -> {
+            ClipboardManager cb = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cb != null && legenda != null && !legenda.isEmpty()) cb.setPrimaryClip(ClipData.newPlainText("legenda", legenda));
+            Intent i = new Intent(Intent.ACTION_SEND);
+            i.setType("video/mp4");
+            i.putExtra(Intent.EXTRA_STREAM, uri);
+            if (legenda != null && !legenda.isEmpty()) i.putExtra(Intent.EXTRA_TEXT, legenda);
+            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            i.setPackage(pac);
+            try {
+                startActivity(i);
+            } catch (Exception e) {
+                i.setPackage(null);
+                startActivity(Intent.createChooser(i, "Postar com"));
+            }
+        });
+        return "";
+    }
+
     class Ponte {
+        @JavascriptInterface public String postar(String caminho, String rede, String legenda) {
+            return MainActivity.this.postar(caminho, rede, legenda);
+        }
         @JavascriptInterface public String instalar() { return INSTALAR; }
         @JavascriptInterface public boolean termuxOk() { return termuxInstalado(); }
         @JavascriptInterface public boolean permissao() { return temPermissao(); }
