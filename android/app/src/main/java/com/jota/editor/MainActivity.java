@@ -198,7 +198,7 @@ public class MainActivity extends Activity {
     // ------------------------------------------------------------ ponte com o HTML
     class Ponte {
         @JavascriptInterface public String instalar() { return INSTALAR; }
-        @JavascriptInterface public boolean termux() { return termuxInstalado(); }
+        @JavascriptInterface public boolean termuxOk() { return termuxInstalado(); }
         @JavascriptInterface public boolean permissao() { return temPermissao(); }
 
         @JavascriptInterface public void copiar(String t) {
@@ -230,7 +230,7 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface public void atualizar() {
             h.post(() -> {
-                if (temPermissao() && termux("pkill -f painel.py; " + INSTALAR + " && echo && echo 'Pronto! Volte pro app Editor Jota.' && sleep 4", false)) {
+                if (temPermissao() && MainActivity.this.termux("pkill -f painel.py; " + INSTALAR + " && echo && echo 'Pronto! Volte pro app Editor Jota.' && sleep 4", false)) {
                     Toast.makeText(MainActivity.this, "Atualizando no Termux…", Toast.LENGTH_LONG).show();
                     h.postDelayed(() -> iniciar(), 4000);
                 } else {
@@ -242,7 +242,7 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface public void reiniciar() {
             h.post(() -> {
-                termux("pkill -f painel.py", true);
+                MainActivity.this.termux("pkill -f painel.py", true);
                 h.postDelayed(() -> iniciar(), 1500);
             });
         }

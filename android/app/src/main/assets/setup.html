@@ -34,7 +34,7 @@ button.p{background:#ffc400;color:#111}code{display:block;background:#000;border
 
 <script>
 const m=location.hash.slice(1);document.getElementById('cmd').textContent=Android.instalar();
-const t=Android.termux(),p=Android.permissao();
+const t=Android.termuxOk(),p=Android.permissao();
 if(t)document.getElementById('s1').classList.add('ok');if(p)document.getElementById('s3').classList.add('ok');
 if(m=='naoligou')document.getElementById('naoligou').classList.remove('hide');
 if(m=='config'){document.getElementById('cfg').classList.remove('hide');document.getElementById('topo').textContent='Configurações do app. Os passos abaixo só são necessários se algo parar de funcionar.';
