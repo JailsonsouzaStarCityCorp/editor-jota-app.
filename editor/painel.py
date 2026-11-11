@@ -730,7 +730,7 @@ video.esp{transform:scaleX(-1)}
  <div class="row"><button class="sm" onclick="limparFila()">🧹 Limpar concluídos</button></div>
  <div class="hint">Os vídeos são feitos um depois do outro. Pode continuar montando outros cortes enquanto isso. Deixe o Termux aberto.</div>
 </div>
-<div class="card"><h3>Prontos (Memes_Prontos)</h3><div class="hint">Toque na rede pra abrir o app dela com o vídeo. A legenda já vai copiada: é só colar.</div><div class="prontos" id="prontos"></div></div>
+<div class="card"><h3>Prontos (Memes_Prontos)</h3><button class="sm" onclick="carregarProntos()" style="margin-bottom:6px">↻ Atualizar lista</button><div class="hint">Toque na rede pra abrir o app dela com o vídeo. A legenda já vai copiada: é só colar.</div><div class="prontos" id="prontos"></div></div>
 </section>
 </div>
 
@@ -743,11 +743,11 @@ const v=$('v');
 function toast(t){const e=$('toast');e.textContent=t;e.style.opacity=1;setTimeout(()=>e.style.opacity=0,2200)}
 function seg(x){x=String(x||'').trim().replace(',','.');if(!x)return 0;return x.split(':').reverse().reduce((a,p,i)=>a+parseFloat(p||0)*60**i,0)}
 function fmt(s){s=Math.max(0,s||0);const m=Math.floor(s/60);return m+':'+String((s%60).toFixed(1)).padStart(4,'0')}
-function aba(t){document.querySelectorAll('section').forEach(e=>e.classList.toggle('hide',e.dataset.s!=t));
+function aba(t){document.querySelectorAll('section').forEach(e=>e.classList.toggle('hide',e.dataset.s!=t));if(t=='fila')carregarProntos();
  document.querySelectorAll('.tabs button').forEach(e=>e.classList.toggle('on',e.dataset.t==t));window.scrollTo(0,0);if(t=='fila')verFila();
  if(t=='espelhar'&&v.src){$('v2').src=v.src;$('v2').currentTime=v.currentTime||1}}
 function salvar(){const st={canal:S.canal,foto:S.foto,filtros:S.filtros,musica:S.musica,cor:S.cor,campanha:$('campanha').value};['headline','fonte','rodape','parte','selo','logo_extra'].forEach(k=>st[k]=$(k).value);try{localStorage.ed2=JSON.stringify(st)}catch(e){}}
-async function carregar(){
+async function carregar(){setTimeout(()=>carregarProntos().catch(()=>{}),800);
  D=await (await fetch('/api/tudo')).json();$('pasta').textContent=D.pasta.split('/').slice(-1)[0];
  $('vids').innerHTML=D.videos.map(x=>`<div class="vid${x.nome==S.video?' on':''}" onclick="escolher('${encodeURIComponent(x.nome)}')"><span>${x.nome}</span><small>${x.mb} MB · ${x.quando}</small></div>`).join('')||'<div class="hint">Nenhum vídeo na pasta Download.</div>';
  $('canais').innerHTML=D.canais.map(c=>`<div class="chip${c.id==S.canal?' on':''}" onclick="canal('${c.id}')">${c.logo?`<img src="${c.logo}">`:'<img>'}<span>${c.nome}</span><small>${c.tipo}</small></div>`).join('');
