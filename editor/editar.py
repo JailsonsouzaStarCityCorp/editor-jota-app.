@@ -468,7 +468,7 @@ def main():
         if a.legenda_demo:
             pal = demo_palavras(dur_final)
         else:
-            pal = transcrever(video, tmpdir)
+            pal = transcrever(video, tmpdir, a.headline)
             pal = [(max(0.0, (t0 - ini) / vel), max(0.0, (t1 - ini) / vel), w) for t0, t1, w in pal]
         if pal:
             ass = os.path.join(tmpdir, "legenda.ass")
@@ -893,7 +893,49 @@ def achar_whisper():
     return exe, None
 
 
-def transcrever(video, tmpdir):
+def _preset_dtw(modelo):
+    n = os.path.basename(modelo).lower()
+    for p in ("large-v3-turbo", "large-v3", "large-v2", "medium", "small", "base", "tiny"):
+        if p in n:
+            return p.replace("large-v3-turbo", "large.v3.turbo").replace("large-v", "large.v")
+    return ""
+
+
+def _palavras_dtw(arq_json):
+    """le o JSON completo do whisper e monta as palavras com o tempo do DTW (alinhado ao audio)"""
+    with open(arq_json, encoding="utf-8", errors="ignore") as f:
+        js = json.load(f)
+    toks = []
+    for seg_ in js.get("transcription", []):
+        for t in seg_.get("tokens", []):
+            txt = t.get("text", "")
+            if not txt or txt.startswith("[_") or txt.startswith("<|"):
+                continue
+            td = t.get("t_dtw", -1)
+            ini = td / 100.0 if td is not None and td >= 0 else t.get("offsets", {}).get("from", 0) / 1000.0
+            toks.append((ini, txt))
+    palavras = []
+    for ini, txt in toks:
+        if palavras and not txt.startswith(" ") and palavras[-1][2]:
+            palavras[-1] = (palavras[-1][0], palavras[-1][1], palavras[-1][2] + txt)  # pedaco da mesma palavra
+        else:
+            palavras.append((ini, ini, txt.strip()))
+    out = []
+    for i, (t0, _, w) in enumerate(palavras):
+        w = w.strip()
+        if not w or w.startswith("[") or w.startswith("("):
+            continue
+        if out and re.fullmatch(r"[\W_]+", w):
+            out[-1] = (out[-1][0], out[-1][1], out[-1][2] + w)
+            continue
+        out.append([t0, t0 + 0.3, w])
+    for i in range(len(out)):        # fim = inicio da proxima (max 1,2 s)
+        prox = out[i + 1][0] if i + 1 < len(out) else out[i][0] + 0.6
+        out[i][1] = max(out[i][0] + 0.08, min(prox, out[i][0] + 1.2))
+    return [tuple(x) for x in out]
+
+
+def transcrever(video, tmpdir, dica=""):
     exe, modelo = achar_whisper()
     if not exe or not modelo:
         sys.exit("Legenda precisa do whisper.cpp. Rode uma vez:  bash ~/editor_memes/instalar_legenda.sh")
@@ -901,8 +943,26 @@ def transcrever(video, tmpdir):
     rodar(["ffmpeg", "-v", "error", "-y", "-i", video, "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", wav])
     print(f"Transcrevendo a fala ({os.path.basename(modelo)})... pode levar alguns minutos")
     base = os.path.join(tmpdir, "fala")
+    threads = str(min(4, os.cpu_count() or 4))
+    dica = re.sub(r"[*|]", " ", dica or "")
+    dica = re.sub(r"[^\w\s,.!?áéíóúâêôãõçÁÉÍÓÚÂÊÔÃÕÇ-]", "", dica).strip()
+    extra = ["--prompt", dica.capitalize()] if dica else []
+    # 1) tempo de cada palavra alinhado ao audio (DTW): bem mais certo em video com musica de fundo
+    preset = _preset_dtw(modelo)
+    if preset:
+        r = subprocess.run([exe, "-m", modelo, "-f", wav, "-l", "pt", "-dtw", preset, "-ojf", "-of", base,
+                            "-t", threads, "-np"] + extra, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        if r.returncode == 0 and os.path.exists(base + ".json"):
+            try:
+                pal = _palavras_dtw(base + ".json")
+                if pal:
+                    print(f"Legenda: {len(pal)} palavras (tempo alinhado ao audio)")
+                    return pal
+            except Exception as e:  # noqa: BLE001
+                print(f"Legenda: alinhamento falhou ({e}), usando o modo antigo")
+    # 2) modo antigo (estimativa por palavra)
     r = subprocess.run([exe, "-m", modelo, "-f", wav, "-l", "pt", "-ml", "1", "-sow", "-osrt", "-of", base,
-                        "-t", str(min(4, os.cpu_count() or 4)), "-np"], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+                        "-t", threads, "-np"] + extra, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
     srt = base + ".srt"
     if r.returncode != 0 or not os.path.exists(srt):
         sys.exit("Falhou a transcricao:\n" + (r.stderr or "")[-800:])
@@ -1150,7 +1210,7 @@ def meia_tela_pro(a, video, nome, dur, tem_audio, cena, cor, ini, tmpdir):
     # legenda
     sub = ""
     if a.legenda:
-        pal = transcrever(video, tmpdir)
+        pal = transcrever(video, tmpdir, a.headline)
         pal = [(t0 - ini, t1 - ini, w) for t0, t1, w in pal if t0 >= ini]
         final = []
         if hk:
