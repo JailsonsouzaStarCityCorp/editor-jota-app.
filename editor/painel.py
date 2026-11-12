@@ -142,6 +142,13 @@ def montar_args(p, saida, previa=False, video=None):
     for f in p.get("fotos", []):
         if f.get("nome"):
             args += ["--foto", f'{f["nome"]}@{float(f["t0"]):.1f}-{float(f["t1"]):.1f}']
+    for b in p.get("brolls", []):
+        if b.get("nome"):
+            t1 = b.get("t1")
+            tempo = f'{float(b.get("t0") or 0):.1f}' + (f'-{float(t1):.1f}' if t1 not in (None, "") else "")
+            args += ["--broll", f'{b["nome"]}@{tempo}@{b.get("som") or ""}']
+    if p.get("som_broll"):
+        args += ["--som-broll", str(p["som_broll"])]
     txt = {"fonte": "--fonte", "rodape": "--rodape", "selo": "--selo", "parte": "--parte", "logo_extra": "--logo-extra",
            "titulo": "--titulo", "img1": "--img1", "img2": "--img2", "cor_faixa": "--cor-faixa", "cor_titulo": "--cor-titulo"}
     for k, flag in txt.items():
@@ -678,6 +685,18 @@ video.esp{transform:scaleX(-1)}
  <div><label>Cor do título</label><input type="color" id="cor_titulo" value="#4fe3ff" style="height:44px;padding:2px"></div></div>
  <div class="chips" id="coresFaixa" style="margin-top:8px"></div>
  <div class="hint">A headline vai na faixa colorida. Palavra entre *asteriscos* sai em amarelo.</div></div>
+<div class="card hide" id="boxBroll"><h3>B-roll · imagens embaixo</h3>
+ <div class="hint">Vídeo em cima, headline no meio e as imagens de b-roll embaixo. Cada imagem entra com um som.</div>
+ <label>Cor do fundo da headline</label>
+ <div class="row"><div><input type="color" id="cor_faixa_b" value="#e50914" style="height:44px;padding:2px" oninput="cmd()"></div><div></div></div>
+ <div class="chips" id="coresFaixaB" style="margin-top:8px"></div>
+ <label>Imagem de fundo (fica quando não tem b-roll)</label><select id="img_base" onchange="cmd()"></select>
+ <label>Som padrão quando a imagem aparece</label>
+ <select id="som_broll" onchange="cmd()"><option value="clique">🖱️ Clique</option><option value="pop">🫧 Pop</option><option value="whoosh">💨 Whoosh</option><option value="nenhum">🔇 Sem som</option></select>
+ <div id="brolls" style="margin-top:8px"></div>
+ <input type="file" id="upBroll" accept="image/*" class="hide" onchange="enviarBroll(this)">
+ <div class="row" style="margin-top:8px"><button class="sm" onclick="addBroll()">＋ B-roll no tempo atual</button><button class="sm" onclick="$('upBroll').click()">📂 Enviar imagem</button></div>
+ <div class="hint">O tempo conta a partir do início do trecho. Deixe o "até" vazio pra imagem ficar até a próxima. Palavra da headline entre *asteriscos* sai em amarelo.</div></div>
 <div class="card" id="boxFotos"><h3>6 · Foto</h3><div class="fotos" id="fotos"></div>
  <div class="it"><input class="n" id="fotoT0" value="0.3"><span>até</span><input class="n" id="fotoT1" value="3.5"><button class="sm" onclick="tirarFoto()">Sem foto</button></div>
  <label>Logo extra (campanha)</label>
@@ -692,7 +711,7 @@ video.esp{transform:scaleX(-1)}
   <div class="row"><div><label>Cortar topo (px)</label><input id="cortar_topo" inputmode="numeric" placeholder="0"></div>
   <div><label>Cortar baixo (px)</label><input id="cortar_baixo" inputmode="numeric" placeholder="0"></div></div>
   <div class="row"><div><label>Enquadrar (0 topo · 0.5 meio)</label><input id="enquadrar" placeholder="auto"></div>
-  <div><label>Modelo</label><select id="modelo"><option value="">Padrão do canal</option><option>fofoca</option><option>filme</option><option>meiatela</option><option>padrao</option><option value="colagem">colagem</option></select></div></div>
+  <div><label>Modelo</label><select id="modelo"><option value="">Padrão do canal</option><option>fofoca</option><option>filme</option><option>meiatela</option><option>padrao</option><option value="colagem">colagem</option><option value="broll">b-roll</option></select></div></div>
   <label>Nome do arquivo final</label><input id="nome_saida" placeholder="automático">
  </details></div>
 <div class="card"><h3>8 · Campanha e postagem</h3>
@@ -783,14 +802,15 @@ function canal(id){S.canal=id;carregar();salvar()}
 function tipo(){const c=(D.canais||[]).find(c=>c.id==S.canal);const m=$('modelo').value;return m?(m=='padrao'?'meme':m=='meiatela'?'meia tela':m):(c?c.tipo:'')}
 function ajustarCanal(){const t=tipo(),ff=t=='fofoca';
  ['boxFonte','boxSelo','boxCards','boxFotos'].forEach(i=>$(i).classList.toggle('hide',!ff));
- ['boxRodape','boxParte'].forEach(i=>$(i).classList.toggle('hide',ff||t=='colagem'));$('boxColagem').classList.toggle('hide',t!='colagem');$('tipoCanal').textContent=S.canal?('Modelo: '+t):'Escolha o canal'}
+ ['boxRodape','boxParte'].forEach(i=>$(i).classList.toggle('hide',ff||t=='colagem'||t=='broll'));$('boxColagem').classList.toggle('hide',t!='colagem');$('boxBroll').classList.toggle('hide',t!='broll');rBroll();$('tipoCanal').textContent=S.canal?('Modelo: '+t):'Escolha o canal'}
 function marcar(k){$(k).value=v.currentTime.toFixed(1);desenhar();cmd()}
 function limparTrecho(){$('inicio').value='';$('fim').value='';desenhar();cmd()}
 function tocarTrecho(){v.currentTime=seg($('inicio').value);v.play()}
-function desenhar(){const d=v.duration||0;if(!d)return;const a=seg($('inicio').value),b=seg($('fim').value)||d;
+function desenhar(){const d=v.duration||0;if(!d)return;const a=seg($('inicio').value),b=seg($('fim').value)||d,b2=b;
  $('sel').style.left=(a/d*100)+'%';$('sel').style.width=((b-a)/d*100)+'%';
  $('tIni').textContent='início '+fmt(a);$('tFim').textContent='fim '+fmt(b);$('tDur').textContent='trecho '+fmt(b-a);
  document.querySelectorAll('.tl .mk').forEach(e=>e.remove());S.cards.forEach(c=>mk('c',a+ +c.t0,a+ +c.t1,d));
+ if(tipo()=='broll')(S.brolls||[]).forEach((b,k,L)=>{const f=b.t1!==''?+b.t1:(L[k+1]?+L[k+1].t0:(b2-a));mk('f',a+ +b.t0,a+f,d)});
  if(S.foto&&tipo()=='fofoca')mk('f',a+seg($('fotoT0').value),a+seg($('fotoT1').value),d)}
 function mk(cl,x,y,d){const e=document.createElement('div');e.className='mk '+cl;e.style.left=(x/d*100)+'%';e.style.width=Math.max(1,(y-x)/d*100)+'%';$('tl').appendChild(e)}
 v.addEventListener('timeupdate',()=>{if(v.duration)$('cab').style.left=(v.currentTime/v.duration*100)+'%';const b=seg($('fim').value);if(b&&v.currentTime>b&&!v.paused)v.pause()});
@@ -805,6 +825,19 @@ function rColagem(){const f=(D.fotos||[]);['img1','img2'].forEach(k=>{const v=$(
  $('coresFaixa').innerHTML=CF.map(c=>`<div class="chip" style="width:46px" onclick="$('cor_faixa').value='${c}';cmd()"><span style="display:block;width:30px;height:30px;border-radius:50%;background:${c};border:2px solid #fff3"></span></div>`).join('')}
 function enviarImg(inp){const f=inp.files[0];if(!f)return;fetch('/api/upload_img?nome='+encodeURIComponent(f.name),{method:'POST',body:f}).then(r=>r.json()).then(async r=>{inp.value='';if(r.erro){toast(r.erro);return}
  await carregar();if(!$('img1').value)$('img1').value=r.nome;else $('img2').value=r.nome;cmd();toast('Imagem pronta')})}function tirarFoto(){S.foto='';carregar();salvar()}
+/* b-roll */
+const CFB=['#e50914','#ffd400','#ff4fb8','#a855ff','#00c2ff','#39d353','#ff8a00','#111111','#ffffff'];
+function rBroll(){if(!$('brolls'))return;S.brolls=S.brolls||[];const f=(D.fotos||[]);
+ const opt=sel=>'<option value="">Escolha</option>'+f.map(n=>`<option${n==sel?' selected':''}>${n}</option>`).join('');
+ const vb=$('img_base').value;$('img_base').innerHTML='<option value="">Sem imagem (fundo escuro)</option>'+f.map(n=>`<option>${n}</option>`).join('');$('img_base').value=vb;
+ $('coresFaixaB').innerHTML=CFB.map(c=>`<div class="chip" style="width:46px" onclick="$('cor_faixa_b').value='${c}';cmd()"><span style="display:block;width:30px;height:30px;border-radius:50%;background:${c};border:2px solid #fff3"></span></div>`).join('');
+ $('brolls').innerHTML=S.brolls.map((b,i)=>`<div class="it" style="flex-wrap:wrap"><select style="flex:1;min-width:120px" onchange="S.brolls[${i}].nome=this.value;cmd()">${opt(b.nome)}</select>
+ <input class="n" value="${b.t0}" oninput="S.brolls[${i}].t0=this.value;desenhar();cmd()"><span>até</span><input class="n" value="${b.t1}" placeholder="próx." oninput="S.brolls[${i}].t1=this.value;desenhar();cmd()">
+ <select style="width:96px" onchange="S.brolls[${i}].som=this.value;cmd()">${[['','Padrão'],['clique','Clique'],['pop','Pop'],['whoosh','Whoosh'],['nenhum','Mudo']].map(o=>`<option value="${o[0]}"${(b.som||'')==o[0]?' selected':''}>${o[1]}</option>`).join('')}</select>
+ <button class="sm" onclick="S.brolls.splice(${i},1);rBroll();desenhar();cmd()">✕</button></div>`).join('')||'<div class="hint">Nenhum b-roll ainda.</div>'}
+function addBroll(nome){S.brolls=S.brolls||[];const t=Math.max(0,v.currentTime-seg($('inicio').value));S.brolls.push({nome:nome||'',t0:t.toFixed(1),t1:'',som:''});S.brolls.sort((x,y)=>x.t0-y.t0);rBroll();desenhar();cmd()}
+function enviarBroll(inp){const f=inp.files[0];if(!f)return;fetch('/api/upload_img?nome='+encodeURIComponent(f.name),{method:'POST',body:f}).then(r=>r.json()).then(async r=>{inp.value='';if(r.erro){toast(r.erro);return}
+ await carregar();addBroll(r.nome);toast('Imagem pronta: entrou no tempo atual')})}
 /* momentos fortes */
 async function sugerirG(){if(!S.video){toast('Escolha um vídeo');return}$('sug').innerHTML='<div class="hint">Analisando o áudio… (vídeo longo demora um pouco)</div>';
  const r=await (await fetch('/api/sugerir?f='+encodeURIComponent(S.video)+'&dur='+$('durSug').value)).json();
@@ -863,6 +896,7 @@ $('espelhar').addEventListener('change',()=>{const on=$('espelhar').checked;$('v
 function dados(){const p={video:S.video,canal:S.canal,cards:S.cards.filter(c=>c.texto),filtros:S.filtros,musica:S.musica,post_legenda:$('post').value};
  ['headline','fonte','rodape','parte','selo','logo_extra','cortar_topo','cortar_baixo','enquadrar','modelo','nome_saida'].forEach(k=>p[k]=$(k).value.trim());
  if(tipo()=='colagem'){p.titulo=$('titulo').value.trim();p.img1=$('img1').value;p.img2=$('img2').value;p.cor_faixa=$('cor_faixa').value.slice(1);p.cor_titulo=$('cor_titulo').value.slice(1)}
+ if(tipo()=='broll'){p.img1=$('img_base').value;p.cor_faixa=$('cor_faixa_b').value.slice(1);p.som_broll=$('som_broll').value;p.brolls=(S.brolls||[]).filter(b=>b.nome).map(b=>({nome:b.nome,t0:seg(b.t0),t1:b.t1===''?'':seg(b.t1),som:b.som}))}
  if(tipo()!='fofoca'){p.fonte='';p.selo='';p.cards=[];p.logo_extra=''}else{p.rodape='';p.parte=''}
  p.inicio=seg($('inicio').value);p.fim=seg($('fim').value);
  ['legenda','velocidade_fixa','fade','sem_unico','espelhar'].forEach(k=>p[k]=$(k).checked);p.legenda_cor=S.cor||'';

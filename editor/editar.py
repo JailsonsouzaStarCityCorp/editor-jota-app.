@@ -310,7 +310,7 @@ def main():
     ap.add_argument("--rodape", default="Já segue aí pra não perder os próximos 🤣🤣",
                     help="texto de baixo (use \"\" para tirar)")
     ap.add_argument("--fundo-liso", action="store_true", help="fundo branco 100%% liso (pode ser marcado como borda)")
-    ap.add_argument("--modelo", default=None, choices=["padrao", "meiatela", "filme", "fofoca", "colagem"],
+    ap.add_argument("--modelo", default=None, choices=["padrao", "meiatela", "filme", "fofoca", "colagem", "broll"],
                     help="padrao = template branco | meiatela = imagem em cima + faixa vermelha + video embaixo")
     ap.add_argument("--imagem", help="(meiatela) imagem de cima: caminho, ou 'ultima' = foto mais nova da Download. "
                                      "Sem isso, usa um quadro do proprio video")
@@ -340,6 +340,9 @@ def main():
     ap.add_argument("--img1", default="", help="(colagem) imagem da esquerda (nome da pasta fotos/ ou caminho)")
     ap.add_argument("--img2", default="", help="(colagem) imagem da direita")
     ap.add_argument("--cor-titulo", default="4fe3ff", help="(colagem) cor do titulo, ex: 4fe3ff")
+    ap.add_argument("--broll", action="append", help="(broll) imagem embaixo num tempo: --broll carro@3-6 ou carro@3-6@whoosh (pode repetir)")
+    ap.add_argument("--som-broll", default="clique", choices=["clique", "pop", "whoosh", "nenhum"],
+                    help="(broll) som quando cada b-roll aparece")
     ap.add_argument("--parte", default="", help="(filme) etiqueta embaixo do video, ex: \"Parte 3\"")
     a = ap.parse_args()
     if not a.cor_faixa:
@@ -392,7 +395,7 @@ def main():
 
     if a.sem_corte_auto:
         cx, cy, cw, ch = 0, 0, vw, vh
-    elif a.modelo in ("fofoca", "colagem"):
+    elif a.modelo in ("fofoca", "colagem", "broll"):
         cx, cy, cw, ch = tirar_faixas(video, vw, vh, dur)
     else:
         print("Detectando a cena...")
@@ -467,10 +470,10 @@ def main():
         return meia_tela_pro(a, video, nome, dur, tem_audio, (cx, cy, cw, ch), cor, ini, tmpdir)
     global TEMA
     TEMA = TEMAS.get(a.template, TEMAS["padrao"])
-    if a.modelo in ("fofoca", "colagem") and not a.sem_legenda and not a.previa and (a.legenda or all(achar_whisper())):
+    if a.modelo in ("fofoca", "colagem", "broll") and not a.sem_legenda and not a.previa and (a.legenda or all(achar_whisper())):
         a.legenda = True
     if a.legenda or a.legenda_demo:
-        y_leg = {"padrao": 1470, "meiatela": 1690, "filme": 1370, "fofoca": 1400, "colagem": 1660}[a.modelo]
+        y_leg = {"padrao": 1470, "meiatela": 1690, "filme": 1370, "fofoca": 1400, "colagem": 1660, "broll": BR_VH - 150}[a.modelo]
         if a.legenda_demo:
             pal = demo_palavras(dur_final)
         else:
@@ -478,7 +481,7 @@ def main():
             pal = [(max(0.0, (t0 - ini) / vel), max(0.0, (t1 - ini) / vel), w) for t0, t1, w in pal]
         if pal:
             ass = os.path.join(tmpdir, "legenda.ass")
-            if a.modelo in ("fofoca", "colagem"):
+            if a.modelo in ("fofoca", "colagem", "broll"):
                 gerar_ass_salto(pal, ass, y_leg, a.legenda_cor)
             else:
                 gerar_ass(pal, ass, y_leg, a.legenda_cor or "ffe600")
@@ -487,7 +490,7 @@ def main():
         else:
             print("Legenda: nenhuma fala encontrada, seguindo sem legenda")
 
-    if a.modelo in ("fofoca", "colagem"):
+    if a.modelo in ("fofoca", "colagem", "broll"):
         return fofoca(a, video, nome, dur, dur_final, tem_audio, (cx, cy, cw, ch),
                       vel, ini, cor, vol, fase, espelho, tmpdir)
     if a.modelo == "filme":
@@ -858,7 +861,21 @@ def filme(a, video, nome, dur, dur_final, tem_audio, cena, vel, ini, cor, vol, f
               f"crop={W}:{vh_box}:'(iw-{W})/2':'(ih-{vh_box})/2',setsar=1[v];"
               f"[bg][v]overlay=0:{vy}[x];[x][0:v]overlay=0:0,noise=alls=3:allf=t,{a._sub}format=yuv420p[out]")
     if tem_audio and not a.previa:
-        filtro += f";[1:a]asetpts=PTS-STARTPTS,atempo={vel},volume={vol}[a]"
+        if sons:
+            filtro += f";[1:a]asetpts=PTS-STARTPTS,atempo={vel},volume={vol}[a0]"
+            rot = ["[a0]"]
+            for k, (t0, som) in enumerate(sons):
+                wav = os.path.join(tmpdir, f"som_{som}.wav")
+                if not os.path.exists(wav):
+                    _som_wav(som, wav)
+                idx = sum(1 for x in entradas if x == "-i")
+                entradas += ["-i", wav]
+                ms = int(t0 * 1000)
+                filtro += f";[{idx}:a]aformat=channel_layouts=stereo,adelay={ms}|{ms},volume=0.9[s{k}]"
+                rot.append(f"[s{k}]")
+            filtro += f";{''.join(rot)}amix=inputs={len(rot)}:duration=first:dropout_transition=0:normalize=0[a]"
+        else:
+            filtro += f";[1:a]asetpts=PTS-STARTPTS,atempo={vel},volume={vol}[a]"
     if a.previa:
         prev = os.path.splitext(nome)[0] + "_previa.jpg"
         rodar(["ffmpeg", "-v", "error", "-y", "-loop", "1", "-i", camada, "-ss", f"{min(dur / 2, 3):.2f}",
@@ -1696,6 +1713,133 @@ def camada_colagem(a, P):
     tela.paste(base, (P, P))
     return tela, vy, vh
 
+# ---------------------------------------------------------------- MODELO B-ROLL
+# video em cima + faixa da headline no meio (cor livre) + imagens de b-roll embaixo, com som em cada troca
+BR_VH = 900   # altura do video em cima
+
+
+def _faixa_headline(a, cf, inclinar=False, tam_max=66):
+    d = ImageDraw.Draw(Image.new("RGB", (8, 8)))
+    texto = re.sub(r"\s+", " ", (a.headline or "").replace("|", " ")).strip()
+    linhas, fonte = [], None
+    if texto:
+        fa = os.path.join(FONTES, "Anton-Regular.ttf")
+        palavras = texto.upper().split()
+        for tam in range(tam_max, 34, -4):
+            fonte = ImageFont.truetype(fa, tam)
+            linhas, atual = [], ""
+            for p_ in palavras:
+                t = (atual + " " + p_).strip()
+                if d.textlength(t.replace("*", ""), font=fonte) <= W - 110:
+                    atual = t
+                else:
+                    linhas.append(atual); atual = p_
+            linhas.append(atual)
+            if len(linhas) <= 3:
+                break
+    lh = int(fonte.size * 1.16) if fonte else 0
+    faixa_h = (len(linhas) * lh + 34) if linhas else 26
+    camada = Image.new("RGBA", (W, faixa_h), cf + (255,))
+    dc = ImageDraw.Draw(camada)
+    y = 17
+    for ln in linhas:
+        partes = re.split(r"(\*[^*]+\*)", ln)
+        larg = sum(dc.textlength(x.replace("*", ""), font=fonte) for x in partes)
+        x = (W - larg) / 2
+        for x_ in partes:
+            if not x_:
+                continue
+            t = x_.strip("*")
+            dc.text((x, y), t, font=fonte, fill=(255, 212, 0) if x_.startswith("*") else (255, 255, 255),
+                    stroke_width=5, stroke_fill=(0, 0, 0))
+            x += dc.textlength(t, font=fonte)
+        y += lh
+    if inclinar:
+        camada = camada.transform(camada.size, Image.AFFINE, (1, 0.12, -faixa_h * 0.06, 0, 1, 0), Image.BICUBIC,
+                                  fillcolor=cf + (255,))
+    return camada.convert("RGB")
+
+
+def camada_broll(a, P):
+    cf = _cor_hex(a.cor_faixa, (229, 9, 20))
+    base = Image.new("RGB", (W, H), (12, 12, 14))
+    faixa = _faixa_headline(a, cf, tam_max=58)
+    by = BR_VH + faixa.height                    # comeco da area do b-roll
+    bh = H - by
+    fundo_img = _achar_img(a.img1)
+    if fundo_img:
+        base.paste(_cobrir(fundo_img, W, bh), (0, by))
+    else:   # sem imagem de fundo: degrade escuro na cor da faixa
+        d = ImageDraw.Draw(base)
+        for y in range(bh):
+            k = 0.10 + 0.22 * (y / bh)
+            d.line([(0, by + y), (W, by + y)], fill=tuple(int(c * k) for c in cf))
+    base.paste(faixa, (0, BR_VH))
+    tela = base.resize((W + 2 * P, H + 2 * P), Image.LANCZOS) if P else base.copy()
+    tela.paste(base, (P, P))
+    return tela, by, bh
+
+
+def _som_wav(tipo, caminho):
+    """gera o efeito sonoro na hora (sem precisar de arquivo): clique, pop ou whoosh"""
+    import math, struct, wave
+    sr = 44100
+    rnd = random.Random(7)
+    if tipo == "pop":
+        n = int(sr * 0.09)
+        amos, fase = [], 0.0
+        for i in range(n):
+            t = i / sr
+            f = 900 - 650 * (t / 0.09)
+            fase += 2 * math.pi * f / sr
+            amos.append(math.sin(fase) * math.exp(-t * 38) * 0.9)
+    elif tipo == "whoosh":
+        n = int(sr * 0.38)
+        amos, lp = [], 0.0
+        for i in range(n):
+            t = i / n
+            env = math.sin(math.pi * t) ** 2
+            a_ = 0.04 + 0.3 * t                    # filtro abre durante o som
+            lp += a_ * ((rnd.random() * 2 - 1) - lp)
+            amos.append(lp * env * 2.2)
+    else:   # clique de mouse/camera
+        n = int(sr * 0.05)
+        amos = []
+        for i in range(n):
+            t = i / sr
+            ruido = (rnd.random() * 2 - 1) * math.exp(-t * 260)
+            tique = math.sin(2 * math.pi * 2400 * t) * math.exp(-t * 120) * 0.6
+            amos.append((ruido * 0.7 + tique) * 0.9)
+    with wave.open(caminho, "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(sr)
+        w.writeframes(b"".join(struct.pack("<h", int(max(-1, min(1, v)) * 30000)) for v in amos))
+
+
+def _ler_brolls(a, dur_final):
+    """--broll nome@3-6@som  ->  [(caminho, t0, t1, som)] em ordem; sem fim = ate o proximo"""
+    itens = []
+    for b in a.broll or []:
+        partes = b.split("@")
+        if len(partes) < 2:
+            continue
+        nome, tempo = partes[0], partes[1]
+        som = partes[2] if len(partes) > 2 and partes[2] else a.som_broll
+        cam = _achar_img(nome)
+        if not cam:
+            continue
+        t0, _, t1 = tempo.partition("-")
+        try:
+            t0 = max(0.0, float(t0)); t1 = float(t1) if t1 else None
+        except ValueError:
+            continue
+        itens.append([cam, t0, t1, som])
+    itens.sort(key=lambda x: x[1])
+    for k, it in enumerate(itens):
+        if it[2] is None:
+            it[2] = itens[k + 1][1] if k + 1 < len(itens) else dur_final
+    return [tuple(x) for x in itens if x[2] > x[1]]
+
+
 def fofoca(a, video, nome, dur, dur_final, tem_audio, cena, vel, ini, cor, vol, fase, espelho, tmpdir):
     cx, cy, cw, ch = cena
     PADD = 0 if a.estatico else PAD
@@ -1705,6 +1849,11 @@ def fofoca(a, video, nome, dur, dur_final, tem_audio, cena, vel, ini, cor, vol, 
         img, VY, VH = camada_colagem(a, PADD)
         img.save(fundo)
         LINHA, COR_BARRA = H - 12, _cor_hex(a.cor_faixa, (255, 79, 184))
+    elif a.modelo == "broll":
+        img, BY, BH = camada_broll(a, PADD)
+        img.save(fundo)
+        VY, VH = 0, BR_VH
+        LINHA, COR_BARRA = H - 12, _cor_hex(a.cor_faixa, (229, 9, 20))
     else:
         camada_fofoca(a, PADD).save(fundo)
     esc = max(W / cw, VH / ch) * 1.01
@@ -1759,6 +1908,20 @@ def fofoca(a, video, nome, dur, dur_final, tem_audio, cena, vel, ini, cor, vol, 
         filtro += (f"[{ultimo}][{idx}:v]overlay=x='{xf + PADD}+600*max(0,1-(t-{t0})/0.25)':y={yf + PADD}"
                    f":enable='between(t,{t0},{t1})':shortest=1[f{i}];")
         ultimo = f"f{i}"
+    # b-roll: imagens embaixo, entrando com um "pulo" e um som em cada troca
+    sons = []
+    if a.modelo == "broll":
+        for i, (cam, t0, t1, som) in enumerate(_ler_brolls(a, dur_final)):
+            png = os.path.join(tmpdir, f"broll{i}.jpg")
+            _cobrir(cam, W, BH).save(png, quality=92)
+            idx = sum(1 for x in entradas if x == "-i")
+            entradas += ["-loop", "1", "-i", png]
+            filtro += (f"[{ultimo}][{idx}:v]overlay=x={PADD}:y='{BY + PADD}+70*max(0,1-(t-{t0:.2f})/0.16)'"
+                       f":enable='between(t,{t0:.2f},{t1:.2f})':shortest=1[br{i}];")
+            ultimo = f"br{i}"
+            if som != "nenhum":
+                sons.append((t0, som))
+        print(f"B-roll: {len(_ler_brolls(a, dur_final))} imagem(ns), {len(sons)} som(ns)")
     sub = ""
     if a._sub:
         sub = a._sub
@@ -1769,7 +1932,21 @@ def fofoca(a, video, nome, dur, dur_final, tem_audio, cena, vel, ini, cor, vol, 
                f"noise=alls=3:allf=t,")
     filtro += f"[{ultimo}]{mov}{sub}format=yuv420p[out]"
     if tem_audio and not a.previa:
-        filtro += f";[1:a]asetpts=PTS-STARTPTS,atempo={vel},volume={vol}[a]"
+        if sons:
+            filtro += f";[1:a]asetpts=PTS-STARTPTS,atempo={vel},volume={vol}[a0]"
+            rot = ["[a0]"]
+            for k, (t0, som) in enumerate(sons):
+                wav = os.path.join(tmpdir, f"som_{som}.wav")
+                if not os.path.exists(wav):
+                    _som_wav(som, wav)
+                idx = sum(1 for x in entradas if x == "-i")
+                entradas += ["-i", wav]
+                ms = int(t0 * 1000)
+                filtro += f";[{idx}:a]aformat=channel_layouts=stereo,adelay={ms}|{ms},volume=0.9[s{k}]"
+                rot.append(f"[s{k}]")
+            filtro += f";{''.join(rot)}amix=inputs={len(rot)}:duration=first:dropout_transition=0:normalize=0[a]"
+        else:
+            filtro += f";[1:a]asetpts=PTS-STARTPTS,atempo={vel},volume={vol}[a]"
     if a.previa:
         prev = os.path.splitext(nome)[0] + "_previa.jpg"
         rodar(["ffmpeg", "-v", "error", "-y"] + entradas[:4] + ["-ss", f"{min(dur / 2, 3):.2f}", "-i", video]
