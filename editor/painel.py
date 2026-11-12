@@ -162,6 +162,9 @@ def montar_args(p, saida, previa=False, video=None):
         args += ["--espelhar"]
     if p.get("fade"):
         args += ["--fade"]
+    if p.get("cortar_silencio"):
+        db, pausa = {"leve": (-40, 0.8), "forte": (-30, 0.35)}.get(p.get("silencio_nivel"), (-35, 0.5))
+        args += ["--cortar-silencio", "--silencio-db", str(db), "--silencio-min", str(pausa)]
     corte_t, corte_b = int(p.get("cortar_topo") or 0), int(p.get("cortar_baixo") or 0)
     if corte_t or corte_b or p.get("sem_corte_auto"):
         args += ["--sem-corte-auto"]
@@ -687,6 +690,8 @@ video.esp{transform:scaleX(-1)}
  <div id="boxCor"><label>Cor da palavra falada na legenda</label><div class="chips" id="cores"></div></div>
  <div class="tog"><div>Velocidade original<small>não acelera a voz (campanhas)</small></div><label class="sw"><input type="checkbox" id="velocidade_fixa"><i></i></label></div>
  <div class="tog"><div>Fade no final</div><label class="sw"><input type="checkbox" id="fade"><i></i></label></div>
+ <div class="tog"><div>Cortar silêncios<small>tira as pausas entre as falas (jump cut)</small></div><label class="sw"><input type="checkbox" id="cortar_silencio" onchange="$('boxSil').classList.toggle('hide',!this.checked)"><i></i></label></div>
+ <div id="boxSil" class="hide"><label>Intensidade do corte</label><select id="silencio_nivel"><option value="leve">Leve (só pausas longas)</option><option value="normal" selected>Normal</option><option value="forte">Forte (corta até respiros)</option></select></div>
  <div class="tog"><div>Desligar anti-duplicidade</div><label class="sw"><input type="checkbox" id="sem_unico"><i></i></label></div>
  <details><summary>Avançado</summary>
   <div class="row"><div><label>Cortar topo (px)</label><input id="cortar_topo" inputmode="numeric" placeholder="0"></div>
@@ -865,7 +870,7 @@ function dados(){const p={video:S.video,canal:S.canal,cards:S.cards.filter(c=>c.
  if(tipo()=='colagem'){p.titulo=$('titulo').value.trim();p.img1=$('img1').value;p.img2=$('img2').value;p.cor_faixa=$('cor_faixa').value.slice(1);p.cor_titulo=$('cor_titulo').value.slice(1)}
  if(tipo()!='fofoca'){p.fonte='';p.selo='';p.cards=[];p.logo_extra=''}else{p.rodape='';p.parte=''}
  p.inicio=seg($('inicio').value);p.fim=seg($('fim').value);
- ['legenda','velocidade_fixa','fade','sem_unico','espelhar'].forEach(k=>p[k]=$(k).checked);p.legenda_cor=S.cor||'';
+ ['legenda','velocidade_fixa','fade','sem_unico','espelhar','cortar_silencio'].forEach(k=>p[k]=$(k).checked);p.silencio_nivel=$('silencio_nivel').value;p.legenda_cor=S.cor||'';
  p.fotos=(S.foto&&tipo()=='fofoca')?[{nome:S.foto,t0:seg($('fotoT0').value),t1:seg($('fotoT1').value)}]:[];return p}
 let tc=null;function cmd(){clearTimeout(tc);tc=setTimeout(async()=>{if(!S.video||!S.canal){$('cmd').textContent='Escolha o vídeo e o canal';return}
  const r=await (await fetch('/api/comando',{method:'POST',body:JSON.stringify(dados())})).json();$('cmd').textContent=r.cmd||r.erro},300)}

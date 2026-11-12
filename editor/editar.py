@@ -18,6 +18,7 @@ Opcoes:
   --sem-corte-auto     usa o video inteiro, sem detectar a cena
   --saida ARQUIVO.mp4  nome do arquivo final
   --previa             gera so uma imagem de previa (rapido), sem renderizar o video
+  --cortar-silencio     tira as pausas entre as falas (jump cut). Ajuste: --silencio-db -35 --silencio-min 0.5
 """
 import argparse, glob, json, os, random, re, subprocess, sys, tempfile
 
@@ -285,6 +286,54 @@ def tirar_faixas(video, vw, vh, dur):
     return cx, cy, cw // 2 * 2, ch // 2 * 2
 
 
+def cortar_silencios(video, tmpdir, limiar_db=-35.0, pausa_min=0.5, margem=0.12):
+    """Remove as pausas (trechos abaixo de limiar_db por mais de pausa_min segundos).
+    Deixa 'margem' segundos de respiro antes e depois de cada fala para nao comer palavra.
+    Devolve o caminho do video novo, ou o mesmo video se nao houver silencio pra tirar."""
+    _vw, _vh, dur, com_audio = info_video(video)
+    if not com_audio:
+        print("Corte de silencio: video sem audio, pulando")
+        return video
+    r = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", video, "-vn",
+                        "-af", f"silencedetect=noise={limiar_db}dB:d={pausa_min}", "-f", "null", "-"],
+                       capture_output=True, text=True)
+    inicios = [float(x) for x in re.findall(r"silence_start: (-?[\d.]+)", r.stderr)]
+    fins = [float(x) for x in re.findall(r"silence_end: (-?[\d.]+)", r.stderr)]
+    if len(fins) < len(inicios):  # silencio ate o fim do video
+        fins.append(dur)
+    # trechos de silencio, ja descontando a margem de respiro
+    sil = []
+    for s0, s1 in zip(inicios, fins):
+        a0 = max(0.0, s0) + (margem if s0 > 0.05 else 0)
+        a1 = min(dur, s1) - (margem if s1 < dur - 0.05 else 0)
+        if a1 - a0 >= 0.15:
+            sil.append((a0, a1))
+    if not sil:
+        print("Corte de silencio: nenhuma pausa encontrada")
+        return video
+    # trechos que ficam (o contrario dos silencios)
+    manter, t = [], 0.0
+    for a0, a1 in sil:
+        if a0 - t >= 0.1:
+            manter.append((t, a0))
+        t = a1
+    if dur - t >= 0.1:
+        manter.append((t, dur))
+    if not manter:
+        print("Corte de silencio: o video inteiro parece silencio, mantendo como esta")
+        return video
+    total = sum(b - a for a, b in manter)
+    print(f"Corte de silencio: {len(sil)} pausa(s) removida(s), {dur:.1f}s -> {total:.1f}s")
+    expr = "+".join(f"between(t,{a:.3f},{b:.3f})" for a, b in manter)
+    saida = os.path.join(tmpdir, "sem_silencio.mp4")
+    print("Cortando o trecho (silencios)...")
+    rodar(["ffmpeg", "-v", "error", "-y", "-i", video,
+           "-vf", f"select='{expr}',setpts=N/FRAME_RATE/TB",
+           "-af", f"aselect='{expr}',asetpts=N/SR/TB",
+           "-c:v", "libx264", "-preset", "veryfast", "-crf", "17", "-c:a", "aac", "-b:a", "192k", saida])
+    return saida
+
+
 def achar_ultimo():
     vids = [f for ext in ("mp4", "mov", "MP4", "webm") for f in glob.glob(os.path.join(DOWNLOAD, f"*.{ext}"))]
     if not vids:
@@ -341,6 +390,10 @@ def main():
     ap.add_argument("--img2", default="", help="(colagem) imagem da direita")
     ap.add_argument("--cor-titulo", default="4fe3ff", help="(colagem) cor do titulo, ex: 4fe3ff")
     ap.add_argument("--parte", default="", help="(filme) etiqueta embaixo do video, ex: \"Parte 3\"")
+    ap.add_argument("--cortar-silencio", action="store_true", help="remove as pausas/silencios do video (jump cut)")
+    ap.add_argument("--silencio-db", type=float, default=-35.0,
+                    help="abaixo desse volume conta como silencio. Padrao -35 (mais perto de 0 = corta mais)")
+    ap.add_argument("--silencio-min", type=float, default=0.5, help="pausa minima em segundos para cortar. Padrao 0.5")
     a = ap.parse_args()
     if not a.cor_faixa:
         a.cor_faixa = "ff4fb8" if a.modelo == "colagem" else "e50914"
@@ -387,6 +440,10 @@ def main():
         rodar(cmd + ["-c:v", "libx264", "-preset", "veryfast", "-crf", "17", "-c:a", "aac", "-b:a", "192k", cortado])
         a._nome_base = os.path.splitext(os.path.basename(video))[0] + f"_{str(a.inicio or '0').replace(':', '')}"
         video = cortado
+    if a.cortar_silencio:
+        if not hasattr(a, "_nome_base"):
+            a._nome_base = os.path.splitext(os.path.basename(video))[0]
+        video = cortar_silencios(video, tempfile.mkdtemp(), a.silencio_db, a.silencio_min)
     vw, vh, dur, tem_audio = info_video(video)
     print(f"Video: {os.path.basename(video)}  {vw}x{vh}  {dur:.1f}s")
 
