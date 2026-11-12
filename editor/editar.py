@@ -34,6 +34,7 @@ W, H = 1080, 1920
 # area do video no template (x1, y1, x2, y2)
 AREA = (0, 690, 1080, 1560)
 PAD = 14  # margem extra para o movimento do quadro
+IDIOMA = "pt"
 CANAIS_FILME = {"thejota", "neoronios", "nexora", "mentalista", "driverush", "zenthaku"}
 # area da headline
 TXT_Y1, TXT_Y2, TXT_LARG = 280, 680, 960
@@ -345,6 +346,8 @@ def main():
                     help="(broll) som quando cada b-roll aparece")
     ap.add_argument("--parte", default="", help="(filme) etiqueta embaixo do video, ex: \"Parte 3\"")
     a = ap.parse_args()
+    global IDIOMA
+    IDIOMA = "en" if a.template.lower() in INGLES else "pt"
     if not a.cor_faixa:
         a.cor_faixa = "ff4fb8" if a.modelo == "colagem" else "e50914"
 
@@ -560,7 +563,8 @@ NOMES_CANAL = {"naoconte": "Não Conte a Ninguém", "memudobr": "@mememudobr", "
                "silencio": "Depois do Silêncio", "qgclipes": "QG Clipes", "vrumm": "Universo Vrumm",
                # canais de filme
                "thejota": "The Jota Cortes", "neoronios": "Neoronios Clips", "nexora": "Nexora Clips",
-               "mentalista": "O Mentalista", "zenthaku": "Zenthaku", "madruga": "Meme Madruga", "memeverse": "MemeVerse"}
+               "mentalista": "O Mentalista", "zenthaku": "Zenthaku", "madruga": "Meme Madruga", "memeverse": "MemeVerse",
+               "kreekcraft": "Fan Club Kreekcraft"}
 LOGOS = os.path.join(PASTA, "logos")
 SEAM = 760  # onde termina a imagem de cima e comeca o video
 
@@ -973,7 +977,7 @@ def transcrever(video, tmpdir, dica=""):
     # 1) tempo de cada palavra alinhado ao audio (DTW): bem mais certo em video com musica de fundo
     preset = _preset_dtw(modelo)
     if preset:
-        r = subprocess.run([exe, "-m", modelo, "-f", wav, "-l", "pt", "-dtw", preset, "-ojf", "-of", base,
+        r = subprocess.run([exe, "-m", modelo, "-f", wav, "-l", IDIOMA, "-dtw", preset, "-ojf", "-of", base,
                             "-t", threads, "-np"] + extra, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
         if r.returncode == 0 and os.path.exists(base + ".json"):
             try:
@@ -984,7 +988,7 @@ def transcrever(video, tmpdir, dica=""):
             except Exception as e:  # noqa: BLE001
                 print(f"Legenda: alinhamento falhou ({e}), usando o modo antigo")
     # 2) modo antigo (estimativa por palavra)
-    r = subprocess.run([exe, "-m", modelo, "-f", wav, "-l", "pt", "-ml", "1", "-sow", "-osrt", "-of", base,
+    r = subprocess.run([exe, "-m", modelo, "-f", wav, "-l", IDIOMA, "-ml", "1", "-sow", "-osrt", "-of", base,
                         "-t", threads, "-np"] + extra, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
     srt = base + ".srt"
     if r.returncode != 0 or not os.path.exists(srt):
@@ -1321,7 +1325,11 @@ def meia_tela_pro(a, video, nome, dur, tem_audio, cena, cor, ini, tmpdir):
 
 
 # ---------------------------------------------------------------- modelo FOFOCA (Jota Explica)
-CANAIS_FOFOCA = {"jotaexplica", "naoconte", "neoronios", "elisjusti", "nexora"}
+CANAIS_FOFOCA = {"jotaexplica", "naoconte", "neoronios", "elisjusti", "nexora", "kreekcraft"}
+# canais gringos: textos em ingles e legenda transcrita em ingles
+INGLES = {"kreekcraft"}
+# marca d'agua por cima do video (arquivo da pasta logos/)
+MARCA_DAGUA = {"kreekcraft": "kreekcraft_wide.png"}
 # canais em que a voz/rosto nao podem ser alterados (campanha): sem acelerar e sem espelhar
 SEM_ALTERAR = {"elisjusti"}
 # canais com filtro aprimorar + vivido ligado por padrao
@@ -1331,7 +1339,8 @@ FOFOCA_MARCA = {"jotaexplica": ("JOTA", "EXPLICA", ""),
                 "naoconte": ("NÃO CONTE", "A NINGUÉM", "@naoconteaninguemjs"),
                 "neoronios": ("NEORONIOSZ", "CLIPS", "@neoronios.zclips"),
                 "elisjusti": ("", "", "@elisjusti"),
-                "nexora": ("NEXORA", "CLIPS", "")}
+                "nexora": ("NEXORA", "CLIPS", ""),
+                "kreekcraft": ("", "", "@MisterCity-w7w")}
 # cores de cada canal: destaque, selo (emoji, texto, cor), card, legenda (BGR do ASS)
 TEMAS = {"padrao": dict(cor=(255, 196, 0), selo=("🚨", "FOFOCA", (150, 26, 26), (200, 60, 55)),
                         card=((28, 150, 40), (120, 240, 110)), leg="&H0000C4FF&", brilho=(58, 48, 26)),
@@ -1339,6 +1348,8 @@ TEMAS = {"padrao": dict(cor=(255, 196, 0), selo=("🚨", "FOFOCA", (150, 26, 26)
                            card=((10, 100, 180), (90, 210, 255)), leg="&H00EBC800&", brilho=(14, 44, 62)),
          "nexora": dict(cor=(168, 85, 255), selo=("🎮", "GAMES", (70, 24, 140), (168, 85, 255)),
                         card=((90, 40, 170), (200, 150, 255)), leg="&H00FF55A8&", brilho=(40, 18, 70)),
+         "kreekcraft": dict(cor=(255, 214, 0), selo=("🎮", "CLIPS", (150, 18, 18), (235, 40, 40)),
+                            card=((170, 20, 20), (255, 90, 90)), leg="&H0000D4FF&", brilho=(66, 14, 14)),
          "elisjusti": dict(cor=(214, 160, 122), selo=("🎤", "HISTÓRIA", (110, 62, 44), (214, 160, 122)),
                            card=((150, 92, 64), (236, 190, 156)), leg="&H007AA0D6&", brilho=(56, 38, 30))}
 TEMA = TEMAS["padrao"]
@@ -1501,7 +1512,7 @@ def camada_fofoca(a, PADD):
     # fonte
     if a.fonte:
         ff = _anton(46)
-        t = ("FONTE: " + a.fonte).upper()
+        t = (("SOURCE: " if a.template in INGLES else "FONTE: ") + a.fonte).upper()
         tw = d.textlength(t, font=ff)
         if tw > 980:
             ff = _anton(int(46 * 980 / tw)); tw = d.textlength(t, font=ff)
@@ -1875,6 +1886,16 @@ def fofoca(a, video, nome, dur, dur_final, tem_audio, cena, vel, ini, cor, vol, 
               f"color=c=0x{'%02X%02X%02X' % COR_BARRA}:s={W}x10:r=30[pb];"
               f"[b0][pb]overlay=x='{PADD}-{W}+{W}*t/{dur_final:.3f}':y={LINHA + PADD}:shortest=1[b1];")
     ultimo = "b1"
+    # marca d'agua do canal por cima do video (canto de baixo, meio transparente)
+    if a.template in MARCA_DAGUA and os.path.exists(os.path.join(LOGOS, MARCA_DAGUA[a.template])):
+        md = Image.open(os.path.join(LOGOS, MARCA_DAGUA[a.template])).convert("RGBA")
+        mw = 330; md = md.resize((mw, max(2, int(md.height * mw / md.width))), Image.LANCZOS)
+        md.putalpha(md.getchannel("A").point(lambda v: int(v * 0.55)))
+        mpng = os.path.join(tmpdir, "marca.png"); md.save(mpng)
+        idx = sum(1 for x in entradas if x == "-i")
+        entradas += ["-loop", "1", "-i", mpng]
+        filtro += f"[{ultimo}][{idx}:v]overlay=x={W - mw - 30 + PADD}:y={VY + VH - md.height - 40 + PADD}:shortest=1[md];"
+        ultimo = "md"
     # cards verdes:  --card "R$ 190 MIL 💸@8.5"  (aparece em 8.5s por 3s)  ou  "texto@8.5-12"
     for i, c in enumerate(a.card or []):
         txt, _, tempo = c.rpartition("@")
