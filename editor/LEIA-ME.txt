@@ -7,6 +7,8 @@ O que faz:
 - Corta automaticamente legenda/logo/faixas de outras paginas
 - Preenche a area do video toda, sem bordas
 - Zoom leve automatico a cada 2 segundos
+- Corte de silencio opcional: tira as pausas entre as falas
+  (no painel: Ajustes > Cortar silencios; no Termux: --cortar-silencio)
 - Salva em: Armazenamento interno > Memes_Prontos
 
 
