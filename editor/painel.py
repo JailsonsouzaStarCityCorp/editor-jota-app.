@@ -27,7 +27,7 @@ def canais():
     for c in sorted(ids, key=lambda x: nomes.get(x, x).lower().lstrip("@")):
         if c == "elisjusti":
             continue  # a Elis entra como logo extra no Jota Explica
-        tipo = ("fofoca" if c in E.CANAIS_FOFOCA else "filme" if c in E.CANAIS_FILME
+        tipo = ("tweet" if c in E.CANAIS_TWEET else "fofoca" if c in E.CANAIS_FOFOCA else "filme" if c in E.CANAIS_FILME
                 else "meia tela" if c in E.HANDLES or c in ("cyberdefend", "silencio", "qgclipes") else "meme")
         out.append({"id": c, "nome": nomes.get(c, c), "tipo": tipo,
                     "logo": f"/logo?f={c}.png" if os.path.exists(os.path.join(E.LOGOS, c + ".png")) else ""})
@@ -744,6 +744,12 @@ video.esp{transform:scaleX(-1)}
  <div><label>Cor do título</label><input type="color" id="cor_titulo" value="#4fe3ff" style="height:44px;padding:2px"></div></div>
  <div class="chips" id="coresFaixa" style="margin-top:8px"></div>
  <div class="hint">A headline vai na faixa colorida. Palavra entre *asteriscos* sai em amarelo.</div></div>
+<div class="card hide" id="boxTweet"><h3>Post do X</h3>
+ <div class="hint">Cartão igual post do X: logo e nome do canal, a headline como texto do post, uma foto do lado esquerdo e o vídeo do lado direito, com a logo no meio.</div>
+ <label>Foto da esquerda</label><select id="img_tw" onchange="cmd()"></select>
+ <input type="file" id="upTw" accept="image/*" class="hide" onchange="enviarTw(this)">
+ <div class="row" style="margin-top:8px"><button class="sm" onclick="$('upTw').click()">📂 Enviar foto</button><div></div></div>
+ <div class="hint">Sem foto escolhida, ele usa um quadro do próprio vídeo. Os asteriscos da headline são ignorados nesse modelo.</div></div>
 <div class="card hide" id="boxBroll"><h3>B-roll · imagens embaixo</h3>
  <div class="hint">Vídeo em cima, headline no meio e as imagens de b-roll embaixo. Cada imagem entra com um som.</div>
  <label>Cor do fundo da headline</label>
@@ -771,7 +777,7 @@ video.esp{transform:scaleX(-1)}
   <div class="row"><div><label>Cortar topo (px)</label><input id="cortar_topo" inputmode="numeric" placeholder="0"></div>
   <div><label>Cortar baixo (px)</label><input id="cortar_baixo" inputmode="numeric" placeholder="0"></div></div>
   <div class="row"><div><label>Enquadrar (0 topo · 0.5 meio)</label><input id="enquadrar" placeholder="auto"></div>
-  <div><label>Modelo</label><select id="modelo"><option value="">Padrão do canal</option><option>fofoca</option><option>filme</option><option>meiatela</option><option>padrao</option><option value="colagem">colagem</option><option value="broll">b-roll</option></select></div></div>
+  <div><label>Modelo</label><select id="modelo"><option value="">Padrão do canal</option><option>fofoca</option><option>filme</option><option>meiatela</option><option>padrao</option><option value="colagem">colagem</option><option value="broll">b-roll</option><option value="tweet">post do X</option></select></div></div>
   <label>Nome do arquivo final</label><input id="nome_saida" placeholder="automático">
  </details></div>
 <div class="card"><h3>8 · Campanha e postagem</h3>
@@ -862,7 +868,7 @@ function canal(id){S.canal=id;carregar();salvar()}
 function tipo(){const c=(D.canais||[]).find(c=>c.id==S.canal);const m=$('modelo').value;return m?(m=='padrao'?'meme':m=='meiatela'?'meia tela':m):(c?c.tipo:'')}
 function ajustarCanal(){const t=tipo(),ff=t=='fofoca';
  ['boxFonte','boxSelo','boxCards','boxFotos'].forEach(i=>$(i).classList.toggle('hide',!ff));
- ['boxRodape','boxParte'].forEach(i=>$(i).classList.toggle('hide',ff||t=='colagem'||t=='broll'));$('boxColagem').classList.toggle('hide',t!='colagem');$('boxBroll').classList.toggle('hide',t!='broll');rBroll();$('tipoCanal').textContent=S.canal?('Modelo: '+t):'Escolha o canal'}
+ ['boxRodape','boxParte'].forEach(i=>$(i).classList.toggle('hide',ff||t=='colagem'||t=='broll'||t=='tweet'));$('boxColagem').classList.toggle('hide',t!='colagem');$('boxBroll').classList.toggle('hide',t!='broll');rBroll();$('boxTweet').classList.toggle('hide',t!='tweet');rTw();$('tipoCanal').textContent=S.canal?('Modelo: '+t):'Escolha o canal'}
 function marcar(k){$(k).value=v.currentTime.toFixed(1);desenhar();cmd()}
 function limparTrecho(){$('inicio').value='';$('fim').value='';desenhar();cmd()}
 function tocarTrecho(){v.currentTime=seg($('inicio').value);v.play()}
@@ -885,6 +891,10 @@ function rColagem(){const f=(D.fotos||[]);['img1','img2'].forEach(k=>{const v=$(
  $('coresFaixa').innerHTML=CF.map(c=>`<div class="chip" style="width:46px" onclick="$('cor_faixa').value='${c}';cmd()"><span style="display:block;width:30px;height:30px;border-radius:50%;background:${c};border:2px solid #fff3"></span></div>`).join('')}
 function enviarImg(inp){const f=inp.files[0];if(!f)return;fetch('/api/upload_img?nome='+encodeURIComponent(f.name),{method:'POST',body:f}).then(r=>r.json()).then(async r=>{inp.value='';if(r.erro){toast(r.erro);return}
  await carregar();if(!$('img1').value)$('img1').value=r.nome;else $('img2').value=r.nome;cmd();toast('Imagem pronta')})}function tirarFoto(){S.foto='';carregar();salvar()}
+/* post do X */
+function rTw(){if(!$('img_tw'))return;const vb=$('img_tw').value;$('img_tw').innerHTML='<option value="">Usar um quadro do vídeo</option>'+(D.fotos||[]).map(n=>`<option>${n}</option>`).join('');$('img_tw').value=vb}
+function enviarTw(inp){const f=inp.files[0];if(!f)return;fetch('/api/upload_img?nome='+encodeURIComponent(f.name),{method:'POST',body:f}).then(r=>r.json()).then(async r=>{inp.value='';if(r.erro){toast(r.erro);return}
+ await carregar();rTw();$('img_tw').value=r.nome;cmd();toast('Foto pronta')})}
 /* juntar trechos */
 function addJunta(){if(!S.video){toast('Escolha um vídeo');return}const a=seg($('inicio').value),b=seg($('fim').value)||(v.duration||0);
  if(b<=a){toast('Marque o início e o fim do trecho');return}S.juntar=S.juntar||[];S.juntar.push({video:S.video,inicio:+a.toFixed(2),fim:+b.toFixed(2)});rJunta();cmd();toast('Trecho '+S.juntar.length+' adicionado')}
@@ -967,6 +977,7 @@ $('espelhar').addEventListener('change',()=>{const on=$('espelhar').checked;$('v
 function dados(){const p={video:S.video,canal:S.canal,cards:S.cards.filter(c=>c.texto),filtros:S.filtros,musica:S.musica,post_legenda:$('post').value,juntar:(S.juntar||[]).length>=2?S.juntar:[]};
  ['headline','fonte','rodape','parte','selo','logo_extra','cortar_topo','cortar_baixo','enquadrar','modelo','nome_saida'].forEach(k=>p[k]=$(k).value.trim());
  if(tipo()=='colagem'){p.titulo=$('titulo').value.trim();p.img1=$('img1').value;p.img2=$('img2').value;p.cor_faixa=$('cor_faixa').value.slice(1);p.cor_titulo=$('cor_titulo').value.slice(1)}
+ if(tipo()=='tweet'){p.img1=$('img_tw').value}
  if(tipo()=='broll'){p.img1=$('img_base').value;p.cor_faixa=$('cor_faixa_b').value.slice(1);p.som_broll=$('som_broll').value;p.brolls=(S.brolls||[]).filter(b=>b.nome).map(b=>({nome:b.nome,t0:seg(b.t0),t1:b.t1===''?'':seg(b.t1),som:b.som}))}
  if(tipo()!='fofoca'){p.fonte='';p.selo='';p.cards=[];p.logo_extra=''}else{p.rodape='';p.parte=''}
  p.inicio=seg($('inicio').value);p.fim=seg($('fim').value);

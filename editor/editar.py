@@ -311,7 +311,7 @@ def main():
     ap.add_argument("--rodape", default="Já segue aí pra não perder os próximos 🤣🤣",
                     help="texto de baixo (use \"\" para tirar)")
     ap.add_argument("--fundo-liso", action="store_true", help="fundo branco 100%% liso (pode ser marcado como borda)")
-    ap.add_argument("--modelo", default=None, choices=["padrao", "meiatela", "filme", "fofoca", "colagem", "broll"],
+    ap.add_argument("--modelo", default=None, choices=["padrao", "meiatela", "filme", "fofoca", "colagem", "broll", "tweet"],
                     help="padrao = template branco | meiatela = imagem em cima + faixa vermelha + video embaixo")
     ap.add_argument("--imagem", help="(meiatela) imagem de cima: caminho, ou 'ultima' = foto mais nova da Download. "
                                      "Sem isso, usa um quadro do proprio video")
@@ -359,7 +359,8 @@ def main():
     tpl = os.path.join(TEMPLATES, a.template + ".png")
     so_logo = os.path.exists(os.path.join(LOGOS, a.template + ".png"))
     if a.modelo is None:  # escolhe o modelo certo do canal
-        a.modelo = ("fofoca" if a.template in CANAIS_FOFOCA else
+        a.modelo = ("tweet" if a.template in CANAIS_TWEET else
+                    "fofoca" if a.template in CANAIS_FOFOCA else
                     "filme" if a.template in CANAIS_FILME else
                     "padrao" if os.path.exists(tpl) else "meiatela")
     if not os.path.exists(tpl):
@@ -399,7 +400,7 @@ def main():
 
     if a.sem_corte_auto:
         cx, cy, cw, ch = 0, 0, vw, vh
-    elif a.modelo in ("fofoca", "colagem", "broll"):
+    elif a.modelo in ("fofoca", "colagem", "broll", "tweet"):
         cx, cy, cw, ch = tirar_faixas(video, vw, vh, dur)
     else:
         print("Detectando a cena...")
@@ -477,7 +478,7 @@ def main():
     if a.modelo in ("fofoca", "colagem", "broll") and not a.sem_legenda and not a.previa and (a.legenda or all(achar_whisper())):
         a.legenda = True
     if a.legenda or a.legenda_demo:
-        y_leg = {"padrao": 1470, "meiatela": 1690, "filme": 1370, "fofoca": 1400, "colagem": 1660, "broll": BR_VH - 150}[a.modelo]
+        y_leg = {"padrao": 1470, "meiatela": 1690, "filme": 1370, "fofoca": 1400, "colagem": 1660, "broll": BR_VH - 150, "tweet": 1500}[a.modelo]
         if a.legenda_demo:
             pal = demo_palavras(dur_final)
         else:
@@ -485,7 +486,7 @@ def main():
             pal = [(max(0.0, (t0 - ini) / vel), max(0.0, (t1 - ini) / vel), w) for t0, t1, w in pal]
         if pal:
             ass = os.path.join(tmpdir, "legenda.ass")
-            if a.modelo in ("fofoca", "colagem", "broll"):
+            if a.modelo in ("fofoca", "colagem", "broll", "tweet"):
                 gerar_ass_salto(pal, ass, y_leg, a.legenda_cor)
             else:
                 gerar_ass(pal, ass, y_leg, a.legenda_cor or "ffe600")
@@ -494,7 +495,7 @@ def main():
         else:
             print("Legenda: nenhuma fala encontrada, seguindo sem legenda")
 
-    if a.modelo in ("fofoca", "colagem", "broll"):
+    if a.modelo in ("fofoca", "colagem", "broll", "tweet"):
         return fofoca(a, video, nome, dur, dur_final, tem_audio, (cx, cy, cw, ch),
                       vel, ini, cor, vol, fase, espelho, tmpdir)
     if a.modelo == "filme":
@@ -1327,6 +1328,8 @@ def meia_tela_pro(a, video, nome, dur, tem_audio, cena, cor, ini, tmpdir):
 
 # ---------------------------------------------------------------- modelo FOFOCA (Jota Explica)
 CANAIS_FOFOCA = {"jotaexplica", "naoconte", "neoronios", "elisjusti", "nexora", "kreekcraft"}
+# canais que usam o modelo "post do X" por padrao
+CANAIS_TWEET = {"qgclipes"}
 # canais gringos: textos em ingles e legenda transcrita em ingles
 INGLES = {"kreekcraft"}
 # marca d'agua por cima do video (arquivo da pasta logos/)
@@ -1928,12 +1931,129 @@ def _expr_tempo(pontos):
     return f"if(lt(t,{pontos[0][0]:.2f}),{pontos[0][1]:.4f},{e})"
 
 
+# ---------------------------------------------------------------- MODELO TWEET (post do X)
+def _foto_do_video(video, tmpdir):
+    """um quadro do meio do video, pra usar de foto quando nao escolheram nenhuma"""
+    out = os.path.join(tmpdir, "foto_video.jpg")
+    d = 0
+    try:
+        d = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", video],
+                                 capture_output=True, text=True).stdout.strip() or 0)
+    except ValueError:
+        pass
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{d * 0.3:.2f}", "-i", video, "-frames:v", "1", out])
+    return out if os.path.exists(out) else None
+
+
+def _cantos(img, r):
+    m = Image.new("L", img.size, 0)
+    ImageDraw.Draw(m).rounded_rectangle((0, 0, img.width - 1, img.height - 1), r, fill=255)
+    img = img.convert("RGBA"); img.putalpha(m)
+    return img
+
+
+def camada_tweet(a, P, video, tmpdir):
+    """cartao branco igual post do X: logo + nome + selo, headline, foto do lado do video e a logo no meio"""
+    FUNDO, CARD = (11, 13, 18), (255, 255, 255)
+    CX, CW, PAD_C = 40, W - 80, 44
+    fb = ImageFont.truetype(os.path.join(FONTES, "Poppins-Bold.ttf"), 50)
+    fr = ImageFont.truetype(os.path.join(FONTES, "Poppins-Regular.ttf"), 50)
+    fe = carregar_emoji()
+    d = ImageDraw.Draw(Image.new("RGB", (8, 8)))
+    texto = re.sub(r"\s+", " ", (a.headline or "").replace("|", " ").replace("*", "")).strip()
+    larg_max = CW - 2 * PAD_C
+
+    def larg(t):
+        return sum(d.textlength(q, font=fr) if k == "t" else 58 for k, q in pedacos(t))
+    linhas, atual = [], ""
+    for pal in texto.split():
+        t = (atual + " " + pal).strip()
+        if atual and larg(t) > larg_max:
+            linhas.append(atual); atual = pal
+        else:
+            atual = t
+    if atual:
+        linhas.append(atual)
+    LH = 66
+    txt_h = len(linhas) * LH
+    MW = (CW - 2 * PAD_C - 12) // 2                      # largura de cada lado (foto | video)
+    topo_media = PAD_C + 130 + 26 + txt_h + 34
+    MH = min(1040, H - 140 - topo_media - PAD_C)
+    MH -= MH % 2
+    card_h = topo_media + MH + PAD_C + 40
+    cy0 = (H - card_h) // 2
+    base = Image.new("RGB", (W, H), FUNDO)
+    dd = ImageDraw.Draw(base)
+    dd.rounded_rectangle((CX, cy0, CX + CW, cy0 + card_h), 46, fill=CARD)
+    # cabecalho: logo redonda, nome, selo azul e o X
+    ax, ay = CX + PAD_C, cy0 + PAD_C
+    av = avatar_do_template(a.template, 130)
+    if av:
+        mk = Image.new("L", (130, 130), 0); ImageDraw.Draw(mk).ellipse((0, 0, 129, 129), fill=255)
+        base.paste(av.convert("RGB"), (ax, ay), mk)
+    nome = NOMES_CANAL.get(a.template, a.template)
+    nx, ny = ax + 152, ay + 30
+    dd.text((nx, ny), nome, font=fb, fill=(15, 20, 25))
+    bx = nx + d.textlength(nome, font=fb) + 14
+    dd.ellipse((bx, ny + 12, bx + 46, ny + 58), fill=(29, 155, 240))
+    dd.line([(bx + 11, ny + 36), (bx + 20, ny + 45), (bx + 36, ny + 25)], fill=(255, 255, 255), width=6, joint="curve")
+    fx = ImageFont.truetype(os.path.join(FONTES, "Poppins-Bold.ttf"), 64)
+    dd.text((CX + CW - PAD_C - 44, ay + 22), "X", font=fx, fill=(15, 20, 25))
+    # headline (com emoji)
+    y = ay + 130 + 26
+    for ln in linhas:
+        x = CX + PAD_C
+        for k, q in pedacos(ln):
+            if k == "t":
+                dd.text((x, y), q, font=fr, fill=(15, 20, 25)); x += d.textlength(q, font=fr)
+            else:
+                e = img_emoji(fe, q, 52)
+                if e:
+                    base.paste(e, (int(x), y + 8), e); x += e.width + 4
+        y += LH
+    # foto da esquerda
+    my = cy0 + topo_media
+    mx = CX + PAD_C
+    foto = _achar_img(a.img1) or _foto_do_video(video, tmpdir)
+    if foto:
+        fimg = _cantos(_cobrir(foto, MW, MH), 22)
+        base.paste(fimg, (mx, my), fimg)
+    VX, VY = mx + MW + 12, my
+    # frente: cantos arredondados do video + logo do canal no meio
+    frente = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    canto = Image.new("RGBA", (MW, MH), CARD + (255,))
+    furo = Image.new("L", (MW, MH), 255)
+    ImageDraw.Draw(furo).rounded_rectangle((0, 0, MW - 1, MH - 1), 22, fill=0)
+    canto.putalpha(furo)
+    frente.paste(canto, (VX, VY), canto)
+    if av:
+        R = 190
+        lg = av.resize((R - 16, R - 16), Image.LANCZOS)
+        circ = Image.new("RGBA", (R, R), (0, 0, 0, 0))
+        ImageDraw.Draw(circ).ellipse((0, 0, R - 1, R - 1), fill=(255, 255, 255, 255))
+        mk = Image.new("L", lg.size, 0); ImageDraw.Draw(mk).ellipse((0, 0, lg.width - 1, lg.height - 1), fill=255)
+        circ.paste(lg, (8, 8), mk)
+        frente.paste(circ, (mx + MW + 6 - R // 2, my + MH // 2 - R // 2), circ)
+    if P:
+        tela = base.resize((W + 2 * P, H + 2 * P), Image.LANCZOS); tela.paste(base, (P, P))
+        f2 = Image.new("RGBA", (W + 2 * P, H + 2 * P), (0, 0, 0, 0)); f2.paste(frente, (P, P)); frente = f2
+    else:
+        tela = base
+    return tela, frente, VX, VY, MW, MH, cy0 + card_h
+
+
 def fofoca(a, video, nome, dur, dur_final, tem_audio, cena, vel, ini, cor, vol, fase, espelho, tmpdir):
     cx, cy, cw, ch = cena
     PADD = 0 if a.estatico else PAD
     fundo = os.path.join(tmpdir, "fofoca.png")
     VY, VH, LINHA, COR_BARRA = FF_VY, FF_VH, FF_LINHA2, (TEMA["cor"] if a.template in TEMAS else (224, 24, 24))
-    if a.modelo == "colagem":
+    VX, VW, frente = 0, W, None
+    if a.modelo == "tweet":
+        img, frente_img, VX, VY, VW, VH, fim_card = camada_tweet(a, PADD, video, tmpdir)
+        img.save(fundo)
+        frente = os.path.join(tmpdir, "frente.png"); frente_img.save(frente)
+        LINHA, COR_BARRA = min(H - 12, fim_card + 20), (29, 155, 240)
+    elif a.modelo == "colagem":
         img, VY, VH = camada_colagem(a, PADD)
         img.save(fundo)
         LINHA, COR_BARRA = H - 12, _cor_hex(a.cor_faixa, (255, 79, 184))
@@ -1944,12 +2064,12 @@ def fofoca(a, video, nome, dur, dur_final, tem_audio, cena, vel, ini, cor, vol, 
         LINHA, COR_BARRA = H - 12, _cor_hex(a.cor_faixa, (229, 9, 20))
     else:
         camada_fofoca(a, PADD).save(fundo)
-    esc = max(W / cw, VH / ch) * 1.01
+    esc = max(VW / cw, VH / ch) * 1.01
     sw, sh = int(cw * esc) // 2 * 2 + 2, int(ch * esc) // 2 * 2 + 2
     zoom_f = expr_zoom(sw, sh, min(a.zoom, 0.05), a.intervalo, fase)
     # video em pe: rosto fica em cima, entao recorta mais perto do topo
     fy = a.enquadrar if a.enquadrar is not None else (0.12 if ch > cw * 1.1 else 0.35)
-    pos_x, pos_y = "(iw-%d)/2" % W, "(ih-%d)*%s" % (VH, fy)
+    pos_x, pos_y = "(iw-%d)/2" % VW, "(ih-%d)*%s" % (VH, fy)
     # enquadrar no rosto: acompanha o rosto principal (fica a uns 40%% da altura do quadro, livre da legenda)
     if a.enquadrar is None and not a.sem_rosto:
         trilha = seguir_rosto(video, ini, dur, cena, tmpdir)
@@ -1958,7 +2078,7 @@ def fofoca(a, video, nome, dur, dur_final, tem_audio, cena, vel, ini, cor, vol, 
             ty = _expr_tempo([(t / vel, y) for t, x, y in trilha])
             tx = _expr_tempo([(t / vel, (1 - x) if espx else x) for t, x, y in trilha])
             pos_y = f"max(0,min(ih-{VH},({ty})*ih-{int(VH * 0.40)}))"
-            pos_x = f"max(0,min(iw-{W},({tx})*iw-{W // 2}))"
+            pos_x = f"max(0,min(iw-{VW},({tx})*iw-{VW // 2}))"
     entradas = ["-loop", "1", "-i", fundo, "-ss", f"{ini}", "-i", video]
     # APRIMORAR (tira ruido + nitidez) e VIVIDO (cores vivas). Ligado por padrao no jotaexplica
     aprim = ""
@@ -1968,11 +2088,16 @@ def fofoca(a, video, nome, dur, dur_final, tem_audio, cena, vel, ini, cor, vol, 
     # "QUALIDADE 4K": nitidez de detalhe depois de ajustar o tamanho (efeito de imagem mais definida)
     detalhe = "cas=0.6,unsharp=3:3:0.45:3:3:0," if aprim else ""
     filtro = (f"[1:v]setpts=(PTS-STARTPTS)/{vel},crop={cw}:{ch}:{cx}:{cy},{espelho}{cor}{aprim}fps=30,"
-              f"scale={sw}:{sh}:flags=lanczos,{zoom_f}crop={W}:{VH}:'{pos_x}':'{pos_y}',{detalhe}setsar=1[v];"
-              f"[0:v][v]overlay={PADD}:{VY + PADD}:shortest=1[b0];"
+              f"scale={sw}:{sh}:flags=lanczos,{zoom_f}crop={VW}:{VH}:'{pos_x}':'{pos_y}',{detalhe}setsar=1[v];"
+              f"[0:v][v]overlay={VX + PADD}:{VY + PADD}:shortest=1[b0];"
               f"color=c=0x{'%02X%02X%02X' % COR_BARRA}:s={W}x10:r=30[pb];"
               f"[b0][pb]overlay=x='{PADD}-{W}+{W}*t/{dur_final:.3f}':y={LINHA + PADD}:shortest=1[b1];")
     ultimo = "b1"
+    if frente:   # tweet: cantos arredondados do video + logo no meio
+        idx = sum(1 for x in entradas if x == "-i")
+        entradas += ["-loop", "1", "-i", frente]
+        filtro += f"[{ultimo}][{idx}:v]overlay=0:0:shortest=1[fr];"
+        ultimo = "fr"
     # marca d'agua do canal por cima do video (canto de baixo, meio transparente)
     if a.template in MARCA_DAGUA and os.path.exists(os.path.join(LOGOS, MARCA_DAGUA[a.template])):
         md = Image.open(os.path.join(LOGOS, MARCA_DAGUA[a.template])).convert("RGBA")
