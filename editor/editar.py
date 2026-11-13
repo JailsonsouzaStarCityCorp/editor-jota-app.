@@ -333,6 +333,7 @@ def main():
     ap.add_argument("--selo", default=None, help="(fofoca) texto do selo. Padrao do canal (FOFOCA / CLIPS)")
     ap.add_argument("--card", action="append", help="(fofoca) card verde, ex: --card \"R$ 190 MIL 💸@8.5\" (pode repetir)")
     ap.add_argument("--foto", action="append", help="(fofoca) foto por cima do video: --foto elis05@3-7 (pode repetir)")
+    ap.add_argument("--sem-rosto", action="store_true", help="(fofoca) nao seguir o rosto; usa o corte fixo")
     ap.add_argument("--enquadrar", type=float, default=None, help="(fofoca) altura do recorte: 0=topo 0.5=meio 1=baixo. Padrao: automatico")
     ap.add_argument("--sem-aprimorar", action="store_true", help="(fofoca) desliga os filtros aprimorar + qualidade 4K + vivido")
     ap.add_argument("--logo-extra", default="", help="(fofoca) logo de campanha no lugar do selo, ex: elisjusti")
@@ -1851,6 +1852,82 @@ def _ler_brolls(a, dur_final):
     return [tuple(x) for x in itens if x[2] > x[1]]
 
 
+# ---------------------------------------------------------------- ENQUADRAR NO ROSTO
+_DET = [None]
+
+
+def _rostos_img(cv2, img):
+    """rostos de uma imagem: [(cx, cy, largura)] de 0 a 1 (YuNet; se nao tiver, Haar)"""
+    h, w = img.shape[:2]
+    yunet = os.path.join(PASTA, "face_yunet.onnx")
+    out = []
+    if os.path.exists(yunet) and hasattr(cv2, "FaceDetectorYN"):
+        if _DET[0] is None:
+            _DET[0] = cv2.FaceDetectorYN.create(yunet, "", (w, h), 0.7)
+        _DET[0].setInputSize((w, h))
+        _, res = _DET[0].detect(img)
+        for f in (res if res is not None else []):
+            x, y, fw, fh = [float(v) for v in f[:4]]
+            out.append(((x + fw / 2) / w, (y + fh / 2) / h, fw / w))
+        return out
+    try:
+        casc = cv2.CascadeClassifier(os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml"))
+        cinza = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        for x, y, fw, fh in casc.detectMultiScale(cinza, 1.15, 5, minSize=(int(w * 0.06), int(w * 0.06))):
+            out.append(((x + fw / 2) / w, (y + fh / 2) / h, fw / w))
+    except Exception:
+        pass
+    return out
+
+
+def seguir_rosto(video, ini, dur, cena, tmpdir):
+    """acha o rosto principal ao longo do trecho: [(t, x, y)] de 0 a 1 dentro da cena, ou None"""
+    try:
+        import cv2
+    except Exception:
+        print("Enquadrar no rosto: OpenCV nao instalado (pkg install opencv-python). Usando o corte padrao.")
+        return None
+    cx, cy, cw, ch = cena
+    n = max(4, min(45, int(dur / 0.8)))
+    pasta = os.path.join(tmpdir, "rostos"); os.makedirs(pasta, exist_ok=True)
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{ini}", "-t", f"{dur:.2f}", "-i", video, "-vf",
+                    f"crop={cw}:{ch}:{cx}:{cy},fps={n / dur:.4f},scale=480:-2", os.path.join(pasta, "f_%03d.jpg")])
+    fotos = sorted(glob.glob(os.path.join(pasta, "f_*.jpg")))
+    if not fotos:
+        return None
+    pts = []
+    for k, f in enumerate(fotos):
+        img = cv2.imread(f)
+        if img is None:
+            continue
+        fs = _rostos_img(cv2, img)
+        if fs:
+            x, y, w = max(fs, key=lambda r: r[2])     # o maior rosto = quem esta falando/aparecendo
+            pts.append(((k + 0.5) * dur / len(fotos), x, y))
+    if len(pts) < max(2, len(fotos) * 0.3):
+        print(f"Enquadrar no rosto: rosto em {len(pts)} de {len(fotos)} quadros, usando o corte padrao")
+        return None
+    # suaviza (mediana de 3 + media movel) pra camera nao ficar tremendo
+    def suave(v):
+        m = [sorted(v[max(0, i - 1):i + 2])[len(v[max(0, i - 1):i + 2]) // 2] for i in range(len(v))]
+        return [sum(m[max(0, i - 1):i + 2]) / len(m[max(0, i - 1):i + 2]) for i in range(len(m))]
+    xs, ys = suave([p_[1] for p_ in pts]), suave([p_[2] for p_ in pts])
+    print(f"Enquadrar no rosto: rosto achado em {len(pts)} de {len(fotos)} quadros")
+    return [(pts[i][0], xs[i], ys[i]) for i in range(len(pts))]
+
+
+def _expr_tempo(pontos):
+    """interpolacao linear ao longo do tempo: [(t, valor)] -> expressao do ffmpeg"""
+    if len(pontos) == 1:
+        return f"{pontos[0][1]:.4f}"
+    e = f"{pontos[-1][1]:.4f}"
+    for i in range(len(pontos) - 2, -1, -1):
+        (t0, v0), (t1, v1) = pontos[i], pontos[i + 1]
+        dt = max(0.01, t1 - t0)
+        e = f"if(lt(t,{t1:.2f}),{v0:.4f}+({v1 - v0:.4f})*(t-{t0:.2f})/{dt:.2f},{e})"
+    return f"if(lt(t,{pontos[0][0]:.2f}),{pontos[0][1]:.4f},{e})"
+
+
 def fofoca(a, video, nome, dur, dur_final, tem_audio, cena, vel, ini, cor, vol, fase, espelho, tmpdir):
     cx, cy, cw, ch = cena
     PADD = 0 if a.estatico else PAD
@@ -1872,6 +1949,16 @@ def fofoca(a, video, nome, dur, dur_final, tem_audio, cena, vel, ini, cor, vol, 
     zoom_f = expr_zoom(sw, sh, min(a.zoom, 0.05), a.intervalo, fase)
     # video em pe: rosto fica em cima, entao recorta mais perto do topo
     fy = a.enquadrar if a.enquadrar is not None else (0.12 if ch > cw * 1.1 else 0.35)
+    pos_x, pos_y = "(iw-%d)/2" % W, "(ih-%d)*%s" % (VH, fy)
+    # enquadrar no rosto: acompanha o rosto principal (fica a uns 40%% da altura do quadro, livre da legenda)
+    if a.enquadrar is None and not a.sem_rosto:
+        trilha = seguir_rosto(video, ini, dur, cena, tmpdir)
+        if trilha:
+            espx = bool(espelho)
+            ty = _expr_tempo([(t / vel, y) for t, x, y in trilha])
+            tx = _expr_tempo([(t / vel, (1 - x) if espx else x) for t, x, y in trilha])
+            pos_y = f"max(0,min(ih-{VH},({ty})*ih-{int(VH * 0.40)}))"
+            pos_x = f"max(0,min(iw-{W},({tx})*iw-{W // 2}))"
     entradas = ["-loop", "1", "-i", fundo, "-ss", f"{ini}", "-i", video]
     # APRIMORAR (tira ruido + nitidez) e VIVIDO (cores vivas). Ligado por padrao no jotaexplica
     aprim = ""
@@ -1881,7 +1968,7 @@ def fofoca(a, video, nome, dur, dur_final, tem_audio, cena, vel, ini, cor, vol, 
     # "QUALIDADE 4K": nitidez de detalhe depois de ajustar o tamanho (efeito de imagem mais definida)
     detalhe = "cas=0.6,unsharp=3:3:0.45:3:3:0," if aprim else ""
     filtro = (f"[1:v]setpts=(PTS-STARTPTS)/{vel},crop={cw}:{ch}:{cx}:{cy},{espelho}{cor}{aprim}fps=30,"
-              f"scale={sw}:{sh}:flags=lanczos,{zoom_f}crop={W}:{VH}:'(iw-{W})/2':'(ih-{VH})*{fy}',{detalhe}setsar=1[v];"
+              f"scale={sw}:{sh}:flags=lanczos,{zoom_f}crop={W}:{VH}:'{pos_x}':'{pos_y}',{detalhe}setsar=1[v];"
               f"[0:v][v]overlay={PADD}:{VY + PADD}:shortest=1[b0];"
               f"color=c=0x{'%02X%02X%02X' % COR_BARRA}:s={W}x10:r=30[pb];"
               f"[b0][pb]overlay=x='{PADD}-{W}+{W}*t/{dur_final:.3f}':y={LINHA + PADD}:shortest=1[b1];")

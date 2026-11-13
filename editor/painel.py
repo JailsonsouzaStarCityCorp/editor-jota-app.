@@ -167,6 +167,8 @@ def montar_args(p, saida, previa=False, video=None):
         args += ["--sem-unico"]
     if p.get("espelhar"):
         args += ["--espelhar"]
+    if p.get("sem_rosto"):
+        args += ["--sem-rosto"]
     if p.get("fade"):
         args += ["--fade"]
     corte_t, corte_b = int(p.get("cortar_topo") or 0), int(p.get("cortar_baixo") or 0)
@@ -763,6 +765,7 @@ video.esp{transform:scaleX(-1)}
  <div id="boxCor"><label>Cor da palavra falada na legenda</label><div class="chips" id="cores"></div></div>
  <div class="tog"><div>Velocidade original<small>não acelera a voz (campanhas)</small></div><label class="sw"><input type="checkbox" id="velocidade_fixa"><i></i></label></div>
  <div class="tog"><div>Fade no final</div><label class="sw"><input type="checkbox" id="fade"><i></i></label></div>
+ <div class="tog"><div>Seguir o rosto<small>enquadra o rosto de quem aparece (modelos fofoca, colagem e b-roll)</small></div><label class="sw"><input type="checkbox" id="rosto" checked onchange="cmd()"><i></i></label></div>
  <div class="tog"><div>Desligar anti-duplicidade</div><label class="sw"><input type="checkbox" id="sem_unico"><i></i></label></div>
  <details><summary>Avançado</summary>
   <div class="row"><div><label>Cortar topo (px)</label><input id="cortar_topo" inputmode="numeric" placeholder="0"></div>
@@ -967,7 +970,7 @@ function dados(){const p={video:S.video,canal:S.canal,cards:S.cards.filter(c=>c.
  if(tipo()=='broll'){p.img1=$('img_base').value;p.cor_faixa=$('cor_faixa_b').value.slice(1);p.som_broll=$('som_broll').value;p.brolls=(S.brolls||[]).filter(b=>b.nome).map(b=>({nome:b.nome,t0:seg(b.t0),t1:b.t1===''?'':seg(b.t1),som:b.som}))}
  if(tipo()!='fofoca'){p.fonte='';p.selo='';p.cards=[];p.logo_extra=''}else{p.rodape='';p.parte=''}
  p.inicio=seg($('inicio').value);p.fim=seg($('fim').value);
- ['legenda','velocidade_fixa','fade','sem_unico','espelhar'].forEach(k=>p[k]=$(k).checked);p.legenda_cor=S.cor||'';
+ ['legenda','velocidade_fixa','fade','sem_unico','espelhar'].forEach(k=>p[k]=$(k).checked);p.legenda_cor=S.cor||'';p.sem_rosto=!$('rosto').checked;
  p.fotos=(S.foto&&tipo()=='fofoca')?[{nome:S.foto,t0:seg($('fotoT0').value),t1:seg($('fotoT1').value)}]:[];return p}
 let tc=null;function cmd(){clearTimeout(tc);tc=setTimeout(async()=>{if(!S.video||!S.canal){$('cmd').textContent='Escolha o vídeo e o canal';return}
  const r=await (await fetch('/api/comando',{method:'POST',body:JSON.stringify(dados())})).json();$('cmd').textContent=r.cmd||r.erro},300)}

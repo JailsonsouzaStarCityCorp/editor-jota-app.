@@ -13,6 +13,8 @@ for p in python ffmpeg curl tar python-numpy python-pillow; do
   fi
 done
 python -c "import numpy, PIL" 2>/dev/null || pip install numpy pillow >/dev/null 2>&1
+# OpenCV: usado pra enquadrar no rosto (se nao instalar, o editor usa o corte fixo)
+python -c "import cv2" 2>/dev/null || { echo "  - instalando opencv (enquadrar no rosto)"; pkg install -y opencv-python >/dev/null 2>&1; }
 
 # acesso aos arquivos do celular (Download, Memes_Prontos)
 if [ ! -d ~/storage/shared ]; then
