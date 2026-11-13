@@ -222,12 +222,61 @@ def tem_audio(c):
                         "-of", "csv=p=0", c], capture_output=True, text=True)
     return bool(r.stdout.strip())
 
+def dimensoes(c):
+    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+                        "-of", "csv=p=0", c], capture_output=True, text=True)
+    try:
+        w, h = [int(x) for x in r.stdout.strip().split(",")[:2]]
+        return w - w % 2, h - h % 2
+    except Exception:
+        return 1080, 1920
+
+
+def juntar_trechos(j, pecas, saida, limite=0):
+    """corta cada trecho e cola tudo num video so (mesmo tamanho, 30fps, audio estereo)"""
+    W0, H0 = dimensoes(os.path.join(VIDEOS, os.path.basename(pecas[0]["video"])))
+    ent, fil, rot, total = [], "", "", 0.0
+    for i, pc in enumerate(pecas):
+        src = os.path.join(VIDEOS, os.path.basename(pc["video"]))
+        if not os.path.exists(src):
+            raise ValueError("Video nao encontrado: " + pc["video"])
+        a = float(pc.get("inicio") or 0)
+        b = float(pc.get("fim") or 0) or duracao(src)
+        d = max(0.3, b - a)
+        if limite and total + d > limite:
+            d = max(0.3, limite - total)
+        ent += ["-ss", f"{a:.2f}", "-t", f"{d:.2f}", "-i", src]
+        fil += (f"[{i}:v]scale={W0}:{H0}:force_original_aspect_ratio=decrease,pad={W0}:{H0}:(ow-iw)/2:(oh-ih)/2,"
+                f"fps=30,setsar=1,format=yuv420p,setpts=PTS-STARTPTS[v{i}];")
+        if tem_audio(src):
+            fil += f"[{i}:a]aresample=44100,aformat=channel_layouts=stereo,asetpts=PTS-STARTPTS[a{i}];"
+        else:
+            fil += f"anullsrc=r=44100:cl=stereo,atrim=0:{d:.2f}[a{i}];"
+        rot += f"[v{i}][a{i}]"
+        total += d
+        if limite and total >= limite:
+            pecas = pecas[:i + 1]
+            break
+    fil += f"{rot}concat=n={len(pecas)}:v=1:a=1[v][a]"
+    cmd = ["ffmpeg", "-v", "error", "-stats", "-y"] + ent + ["-filter_complex", fil, "-map", "[v]", "-map", "[a]",
+           "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-c:a", "aac", "-b:a", "192k", saida]
+    if _stream(j, cmd, total, 0, 20) != 0 or j["status"] == "erro":
+        raise RuntimeError("falhou ao juntar os trechos")
+    return total
+
+
 def executar(jid):
     j = JOBS[jid]; p = j["p"]; previa = j["previa"]
     j["status"], j["etapa"] = "rodando", "Preparando"
     try:
         src = os.path.join(VIDEOS, os.path.basename(p["video"]))
         ini, fim = float(p.get("inicio") or 0), float(p.get("fim") or 0)
+        pecas = [x for x in (p.get("juntar") or []) if x.get("video")]
+        if len(pecas) >= 2:   # 0) juntar varios trechos num video so
+            j["etapa"] = f"Juntando {len(pecas)} trechos"
+            src = os.path.join(TMP, f"junto_{jid}.mp4")
+            juntar_trechos(j, pecas, src, 8 if previa else 0)
+            ini, fim = 0.0, 0.0
         total = duracao(src)
         fim = fim if fim > ini else total
         if previa:
@@ -246,6 +295,8 @@ def executar(jid):
             if _stream(j, cmd, dur, 0, 30) != 0 or j["status"] == "erro":
                 raise RuntimeError("falhou nos filtros")
             base = 30
+        elif src.startswith(TMP):
+            video = src           # trechos juntados: o editor recebe o video pronto
         elif previa:
             video = None
         # 2) editor (template, cards, legenda...)
@@ -663,6 +714,12 @@ video.esp{transform:scaleX(-1)}
  <div class="row" style="margin-top:10px"><button class="pri" onclick="sugerirG()">⭐ Achar os momentos fortes</button>
  <select id="durSug" style="flex:0 0 92px"><option value="15">15s</option><option value="20">20s</option><option value="30" selected>30s</option><option value="45">45s</option></select></div>
  <div id="sug"></div>
+ <div style="margin-top:14px;border-top:1px solid #ffffff1a;padding-top:12px">
+  <label>🔗 Juntar trechos num vídeo só</label>
+  <div class="hint">Marque um trecho e toque em "Adicionar". Pode trocar de vídeo e adicionar mais. Com 2 ou mais trechos, o vídeo sai com todos colados na ordem da lista.</div>
+  <div class="row" style="margin-top:8px"><button class="sm" onclick="addJunta()">＋ Adicionar este trecho</button><button class="sm" onclick="S.juntar=[];rJunta();cmd()">Limpar lista</button></div>
+  <div id="juntaLista" style="margin-top:8px"></div>
+ </div>
 </div>
 <div class="card"><h3>3 · Canal</h3><div class="chips" id="canais"></div><div class="hint" id="tipoCanal"></div></div>
 <div class="card"><h3>4 · Textos</h3>
@@ -825,6 +882,16 @@ function rColagem(){const f=(D.fotos||[]);['img1','img2'].forEach(k=>{const v=$(
  $('coresFaixa').innerHTML=CF.map(c=>`<div class="chip" style="width:46px" onclick="$('cor_faixa').value='${c}';cmd()"><span style="display:block;width:30px;height:30px;border-radius:50%;background:${c};border:2px solid #fff3"></span></div>`).join('')}
 function enviarImg(inp){const f=inp.files[0];if(!f)return;fetch('/api/upload_img?nome='+encodeURIComponent(f.name),{method:'POST',body:f}).then(r=>r.json()).then(async r=>{inp.value='';if(r.erro){toast(r.erro);return}
  await carregar();if(!$('img1').value)$('img1').value=r.nome;else $('img2').value=r.nome;cmd();toast('Imagem pronta')})}function tirarFoto(){S.foto='';carregar();salvar()}
+/* juntar trechos */
+function addJunta(){if(!S.video){toast('Escolha um vídeo');return}const a=seg($('inicio').value),b=seg($('fim').value)||(v.duration||0);
+ if(b<=a){toast('Marque o início e o fim do trecho');return}S.juntar=S.juntar||[];S.juntar.push({video:S.video,inicio:+a.toFixed(2),fim:+b.toFixed(2)});rJunta();cmd();toast('Trecho '+S.juntar.length+' adicionado')}
+function moverJ(i,d){const L=S.juntar,k=i+d;if(k<0||k>=L.length)return;[L[i],L[k]]=[L[k],L[i]];rJunta();cmd()}
+function rJunta(){if(!$('juntaLista'))return;const L=S.juntar||[];const tot=L.reduce((t,x)=>t+(x.fim-x.inicio),0);
+ $('juntaLista').innerHTML=L.map((x,i)=>`<div class="it"><div style="flex:1"><b>${i+1}.</b> ${fmt(x.inicio)} → ${fmt(x.fim)} <span class="hint">(${(x.fim-x.inicio).toFixed(1)}s) ${x.video==S.video?'':'· '+x.video.slice(0,22)}</span></div>
+ <button class="sm" onclick="moverJ(${i},-1)">↑</button><button class="sm" onclick="moverJ(${i},1)">↓</button><button class="sm" onclick="S.juntar.splice(${i},1);rJunta();cmd()">✕</button></div>`).join('')+
+ (L.length?`<div class="hint" style="margin-top:6px">${L.length>=2?'✅ Vai juntar '+L.length+' trechos':'Adicione mais um trecho pra juntar'} · total ${tot.toFixed(1)}s${tot>60?' · ⚠️ passou de 60s':''}</div>`:'')}
+function juntarSelecionados(){const L=selecionados();if(L.length<2){toast('Marque 2 ou mais momentos');return}
+ S.juntar=L.map(o=>({video:S.video,inicio:+o.inicio.toFixed(2),fim:+o.fim.toFixed(2)}));rJunta();cmd();toast(L.length+' momentos na lista de juntar');$('juntaLista').scrollIntoView({behavior:'smooth'})}
 /* b-roll */
 const CFB=['#e50914','#ffd400','#ff4fb8','#a855ff','#00c2ff','#39d353','#ff8a00','#111111','#ffffff'];
 function rBroll(){if(!$('brolls'))return;S.brolls=S.brolls||[];const f=(D.fotos||[]);
@@ -846,6 +913,7 @@ async function sugerirG(){if(!S.video){toast('Escolha um vídeo');return}$('sug'
  $('sug').innerHTML=r.map((o,i)=>`<div class="fj" style="display:flex;gap:10px;align-items:center"><input type="checkbox" class="selSug" data-i="${i}" style="width:24px;height:24px;flex:none" onchange="contarSel()">
  <div style="flex:1" onclick="usarSug(${o.inicio},${o.fim},${o.pico})"><div class="t"><b>${i?'':'🔥 '}${fmt(o.inicio)} → ${fmt(o.fim)}</b><span class="st pronto">força ${o.nota}</span></div><div class="hint">pico em ${fmt(o.pico)} · toque pra ver</div></div></div>`).join('')+
  `<div class="row" style="margin-top:8px"><button class="sm" onclick="marcarTodos()">☑ Marcar todos</button><button class="pri" id="btSel" onclick="gerarSelecionados()">➕ Pôr os marcados na fila</button></div>
+ <div class="row" style="margin-top:6px"><button class="sm" onclick="juntarSelecionados()">🔗 Juntar os marcados num vídeo só</button></div>
  <div class="tog"><div>Numerar as partes<small>Parte 1, Parte 2… na ordem do vídeo</small></div><label class="sw"><input type="checkbox" id="numSug"><i></i></label></div>`;contarSel()}
 let SUG=[];
 function selecionados(){return [...document.querySelectorAll('.selSug')].filter(c=>c.checked).map(c=>SUG[+c.dataset.i]).sort((a,b)=>a.inicio-b.inicio)}
@@ -893,7 +961,7 @@ function salvarA(){if(S.musica){S.musica.inicio=seg($('musIni').value);S.musica.
 /* espelhar */
 $('espelhar').addEventListener('change',()=>{const on=$('espelhar').checked;$('v2').classList.toggle('esp',on);v.classList.toggle('esp',on);$('bE').classList.toggle('hide',!on);cmd()});
 /* dados + comando */
-function dados(){const p={video:S.video,canal:S.canal,cards:S.cards.filter(c=>c.texto),filtros:S.filtros,musica:S.musica,post_legenda:$('post').value};
+function dados(){const p={video:S.video,canal:S.canal,cards:S.cards.filter(c=>c.texto),filtros:S.filtros,musica:S.musica,post_legenda:$('post').value,juntar:(S.juntar||[]).length>=2?S.juntar:[]};
  ['headline','fonte','rodape','parte','selo','logo_extra','cortar_topo','cortar_baixo','enquadrar','modelo','nome_saida'].forEach(k=>p[k]=$(k).value.trim());
  if(tipo()=='colagem'){p.titulo=$('titulo').value.trim();p.img1=$('img1').value;p.img2=$('img2').value;p.cor_faixa=$('cor_faixa').value.slice(1);p.cor_titulo=$('cor_titulo').value.slice(1)}
  if(tipo()=='broll'){p.img1=$('img_base').value;p.cor_faixa=$('cor_faixa_b').value.slice(1);p.som_broll=$('som_broll').value;p.brolls=(S.brolls||[]).filter(b=>b.nome).map(b=>({nome:b.nome,t0:seg(b.t0),t1:b.t1===''?'':seg(b.t1),som:b.som}))}
