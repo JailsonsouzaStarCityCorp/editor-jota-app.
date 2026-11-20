@@ -114,7 +114,24 @@ def abrir_janela(url):
     webbrowser.open(url)
 
 
+def diagnostico(arq):
+    """testa os modulos pesados e salva o erro completo num arquivo (o .exe nao tem console)"""
+    import traceback
+    preparar()
+    with open(arq, "w", encoding="utf-8") as f:
+        f.write("sys.path=" + repr(sys.path) + "\n")
+        for m in ("numpy", "cv2", "soundcard"):
+            try:
+                mod = __import__(m)
+                f.write(f"{m}: ok {getattr(mod, '__version__', '')} {getattr(mod, '__file__', '')}\n")
+            except Exception:
+                f.write(f"{m}: ERRO\n" + traceback.format_exc() + "\n")
+
+
 def main():
+    if "--diag" in sys.argv:
+        diagnostico(sys.argv[sys.argv.index("--diag") + 1])
+        return
     url = f"http://127.0.0.1:{PORTA}/"
     if not porta_ocupada() and not ligar():
         print("Nao consegui ligar o editor.")

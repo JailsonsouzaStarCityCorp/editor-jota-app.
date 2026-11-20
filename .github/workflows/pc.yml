@@ -62,6 +62,10 @@ jobs:
           cp -r editor dist/EditorJota/editor
           cp -r desktop/bin dist/EditorJota/bin
           du -sh dist/EditorJota
+      - name: Diagnóstico do .exe
+        run: |
+          ./dist/EditorJota/EditorJota.exe --diag "$PWD/diag.txt" ; sleep 3; cat diag.txt || true
+          pip list 2>/dev/null | grep -iE "numpy|opencv|soundcard|cffi"
       - name: Testar (programa .exe)
         run: python desktop/teste_pc.py dist/EditorJota/EditorJota.exe
       - name: Instalador
