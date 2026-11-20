@@ -534,11 +534,30 @@ class H(BaseHTTPRequestHandler):
             self._json({"videos": lista_videos(), "canais": canais(), "fotos": fotos, "audios": lista_audios(),
                         "filtros": [{"id": k, "nome": v[0]} for k, v in FILTROS.items()],
                         "prontos": lista_saida(), "pasta": VIDEOS,
-                        "saida_real": os.path.realpath(SAIDA), "posts": ler_posts()})
+                        "saida_real": os.path.realpath(SAIDA), "posts": ler_posts(),
+                        "pc": bool(os.environ.get("EDITOR_JOTA_PC"))})
         elif u.path == "/api/job":
             if q.get("id", "") not in JOBS:
                 return self._json({"status": "erro", "log": ["job nao existe"]}, 404)
             self._json(info_job(q["id"]))
+        elif u.path.startswith("/api/grav/") and os.environ.get("EDITOR_JOTA_PC"):   # gravador de tela (so PC)
+            import gravador_pc as G
+            acao = u.path.rsplit("/", 1)[1]
+            if acao == "estado":
+                return self._json(G.estado())
+            if acao == "janelas":
+                return self._json(G.janelas())
+            if acao == "analisar":
+                try:
+                    return self._json(G.analisar(sugerir, float(q.get("dur", 45))))
+                except Exception as e:  # noqa: BLE001
+                    return self._json({"erro": str(e)}, 500)
+            self.send_error(404)
+        elif u.path == "/api/abrir_pasta" and os.environ.get("EDITOR_JOTA_PC"):   # PC: mostra o video pronto no Explorer
+            alvo = os.path.join(os.path.realpath(SAIDA), nome)
+            if os.name == "nt":
+                subprocess.Popen(["explorer", "/select,", alvo] if os.path.exists(alvo) else ["explorer", os.path.realpath(SAIDA)])
+            self._json({"ok": True})
         elif u.path == "/api/sugerir":
             try:
                 self._json(sugerir(os.path.join(VIDEOS, nome), float(q.get("dur", 30))))
@@ -564,6 +583,17 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         u = urllib.parse.urlparse(self.path)
+        if os.environ.get("EDITOR_JOTA_PC") and u.path.startswith("/api/grav/"):    # gravador de tela (so PC)
+            import gravador_pc as G
+            try:
+                p = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+            except Exception:  # noqa: BLE001
+                p = {}
+            if u.path.endswith("/iniciar"):
+                return self._json(G.iniciar(VIDEOS, p.get("janela", ""), int(p.get("altura", 1080))))
+            if u.path.endswith("/parar"):
+                return self._json(G.parar())
+            return self._json({"erro": "?"}, 404)
         if u.path == "/api/upload_img":  # imagem da colagem: vai pra pasta fotos/ (convertida pra jpg)
             q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
             corpo = self.rfile.read(int(self.headers.get("Content-Length", 0)))
@@ -700,6 +730,17 @@ video.esp{transform:scaleX(-1)}
 
 <!-- ================= EDITAR ================= -->
 <section data-s="editar">
+<div class="card hide" id="boxGrav"><h3>🔴 Gravar tela da live</h3>
+ <div class="hint">Grava a tela (ou só a janela da live) com o som do computador. Fica salvo no seu PC, em partes de 10 minutos, e aparece na lista de vídeos.</div>
+ <div class="row" style="margin-top:8px">
+  <div><label>O que gravar</label><select id="gJanela"><option value="">Tela inteira</option></select></div>
+  <div style="flex:0 0 130px"><label>Qualidade</label><select id="gAlt"><option value="1080">1080p</option><option value="720">720p (PC fraco)</option></select></div></div>
+ <div class="row" style="margin-top:8px"><button class="pri" id="gBt" onclick="gravar()">🔴 Começar a gravar</button><button class="sm" onclick="gJanelas()" style="flex:0 0 110px">↻ Janelas</button></div>
+ <div id="gInfo" class="hint" style="margin-top:8px"></div>
+ <div class="row" style="margin-top:8px"><button class="sm" onclick="gAnalisar()">⭐ Achar os melhores momentos da gravação</button>
+ <select id="gDur" style="flex:0 0 92px"><option value="20">20s</option><option value="30">30s</option><option value="45" selected>45s</option></select></div>
+ <div id="gSug"></div>
+</div>
 <div class="card"><h3>1 · Vídeo</h3>
  <div class="vids" id="vids"></div>
  <div class="row" style="margin-top:8px"><button class="sm" onclick="carregar()">↻ Atualizar lista</button></div>
@@ -862,7 +903,25 @@ async function carregar(){setTimeout(()=>carregarProntos().catch(()=>{}),800);
  $('canais').innerHTML=D.canais.map(c=>`<div class="chip${c.id==S.canal?' on':''}" onclick="canal('${c.id}')">${c.logo?`<img src="${c.logo}">`:'<img>'}<span>${c.nome}</span><small>${c.tipo}</small></div>`).join('');
  $('fotos').innerHTML=D.fotos.map(f=>`<img src="/foto?f=${f}" class="${f==S.foto?'on':''}" onclick="foto('${f}')">`).join('');rColagem();
  $('prontos').innerHTML=D.prontos.map(n=>`<a href="/saida?f=${encodeURIComponent(n)}" target="_blank">🎬 ${n}</a>`).join('')||'<div class="hint">Nada ainda.</div>';
+ if(D.pc&&$('boxGrav').classList.contains('hide')){$('boxGrav').classList.remove('hide');gJanelas();gEstado().then(e=>{if(e.gravando&&!gTimer)gTimer=setInterval(gEstado,1000)})}
  rFiltros();rAudios();ajustarCanal();cmd()}
+/* gravador de tela (so PC) */
+let gTimer=null;
+async function gJanelas(){const js=await (await fetch('/api/grav/janelas')).json();const vv=$('gJanela').value;
+ $('gJanela').innerHTML='<option value="">Tela inteira</option>'+js.map(t=>`<option>${t.replace(/</g,'&lt;')}</option>`).join('');$('gJanela').value=vv}
+function gMostra(e){const m=Math.floor(e.segundos/60),ss=String(e.segundos%60).padStart(2,'0');
+ $('gBt').textContent=e.gravando?'⏹ Parar ('+m+':'+ss+')':'🔴 Começar a gravar';$('gBt').classList.toggle('pri',!e.gravando);
+ $('gInfo').innerHTML=(e.erro?'⚠️ '+e.erro+'<br>':'')+(e.aviso?'⚠️ '+e.aviso+'<br>':'')+(e.partes.length?'Partes: '+e.partes.map(p=>p.nome+' ('+p.mb+' MB)').join(' · '):'')}
+async function gEstado(){const e=await (await fetch('/api/grav/estado')).json();gMostra(e);if(!e.gravando&&gTimer){clearInterval(gTimer);gTimer=null;carregar()}return e}
+async function gravar(){const e=await gEstado();
+ if(e.gravando){toast('Finalizando a gravação…');const r=await (await fetch('/api/grav/parar',{method:'POST'})).json();gMostra(r);carregar();toast('Gravação salva');return}
+ const r=await (await fetch('/api/grav/iniciar',{method:'POST',body:JSON.stringify({janela:$('gJanela').value,altura:$('gAlt').value})})).json();
+ if(r.erro){toast(r.erro);$('gInfo').textContent='⚠️ '+r.erro;return}gMostra(r);gTimer=setInterval(gEstado,1000);toast('Gravando!')}
+async function gAnalisar(){$('gSug').innerHTML='<div class="hint">Analisando todas as partes… (pode demorar alguns minutos)</div>';
+ const r=await (await fetch('/api/grav/analisar?dur='+$('gDur').value)).json();
+ if(r.erro||!r.length){$('gSug').innerHTML='<div class="hint">'+(r.erro||'Nenhuma gravação ainda.')+'</div>';return}
+ $('gSug').innerHTML=r.map(m=>`<div class="it"><div style="flex:1"><b>⭐ ${m.nota}</b> · ${m.video.replace('.mp4','')} · ${fmt(m.inicio)} → ${fmt(m.fim)}</div><button class="sm" onclick="gUsar('${encodeURIComponent(m.video)}',${m.inicio},${m.fim})">Usar</button></div>`).join('')}
+function gUsar(n,a,b){escolher(n);setTimeout(()=>{$('inicio').value=a.toFixed(1);$('fim').value=b.toFixed(1);desenhar();v.currentTime=a;cmd();toast('Trecho marcado: agora é só gerar')},400)}
 function escolher(n){S.video=decodeURIComponent(n);v.src='/video?f='+n;$('inicio').value='';$('fim').value='';carregar();salvar()}
 function canal(id){S.canal=id;carregar();salvar()}
 function tipo(){const c=(D.canais||[]).find(c=>c.id==S.canal);const m=$('modelo').value;return m?(m=='padrao'?'meme':m=='meiatela'?'meia tela':m):(c?c.tipo:'')}
@@ -1019,7 +1078,10 @@ async function carregarProntos(){const d=await (await fetch('/api/tudo')).json()
 function legendaRede(txt,rede){if(rede!='tiktok')return txt;let n=0;   // TikTok: no maximo 5 hashtags
  return txt.replace(/#[\wÀ-ú]+/g,t=>++n<=5?t:'').replace(/[ \t]+\n/g,'\n').replace(/ {2,}/g,' ').trim()}
 function postar(i,rede){const n=PRONTOS.lista[i];let txt=PRONTOS.posts[n]||$('post').value||'';txt=legendaRede(txt,rede);
- if(!window.Android||!Android.postar){navigator.clipboard&&navigator.clipboard.writeText(txt);toast('Postar direto só funciona pelo app Editor Jota. Legenda copiada.');return}
+ if(!window.Android||!Android.postar){navigator.clipboard&&navigator.clipboard.writeText(txt);
+  if(D&&D.pc){const site={tiktok:'https://www.tiktok.com/upload',instagram:'https://www.instagram.com/',youtube:'https://studio.youtube.com/',facebook:'https://www.facebook.com/'}[rede];
+   fetch('/api/abrir_pasta?f='+encodeURIComponent(n));window.open(site,'_blank');toast('Legenda copiada! O vídeo está na pasta que abriu: arraste pro site');return}
+  toast('Postar direto só funciona pelo app Editor Jota. Legenda copiada.');return}
  const r=Android.postar(PRONTOS.pasta+'/'+n,rede,txt);toast(r||('Legenda copiada! Cole no '+({tiktok:'TikTok',instagram:'Instagram',youtube:'YouTube',facebook:'Facebook'}[rede])))}
 async function pararJ(id){await fetch('/api/parar',{method:'POST',body:JSON.stringify({id})});verFila()}
 async function remover(id){await fetch('/api/remover',{method:'POST',body:JSON.stringify({id})});verFila()}

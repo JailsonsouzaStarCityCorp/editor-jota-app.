@@ -1,0 +1,70 @@
+name: Editor Jota PC
+on:
+  push:
+    branches: [main]
+    paths: ["editor/**", "desktop/**", ".github/workflows/pc.yml"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  pc:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Dependências
+        run: python -m pip install -q pyinstaller==6.11.1 pillow==11.0.0 numpy "opencv-python-headless==4.10.0.84" soundcard==0.4.3
+      - name: FFmpeg e Whisper
+        run: |
+          mkdir -p desktop/bin && cd desktop/bin
+          curl -sfL -o ff.zip https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl-shared.zip
+          unzip -q ff.zip && cp ffmpeg-*/bin/*.exe ffmpeg-*/bin/*.dll . && rm -rf ff.zip ffmpeg-* ffplay.exe
+          if curl -sfL -o w.zip https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.4/whisper-bin-x64.zip; then
+            unzip -q -o w.zip -d w && find w -name "*.exe" -o -name "*.dll" | grep -iE "whisper-cli|\.dll" | xargs -I{} cp {} . && rm -rf w w.zip
+          fi
+          if [ ! -f whisper-cli.exe ]; then
+            git clone -q --depth 1 --branch v1.9.4 https://github.com/ggml-org/whisper.cpp /tmp/wc
+            cmake -S /tmp/wc -B /tmp/wcb -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON -DWHISPER_BUILD_TESTS=OFF > /dev/null
+            cmake --build /tmp/wcb --config Release -j 4 --target whisper-cli > /dev/null
+            cp $(find /tmp/wcb -name whisper-cli.exe | head -1) .
+          fi
+          ls -la
+          ./whisper-cli.exe --help > /dev/null 2>&1; echo "whisper-cli ok=$?"
+      - name: Vídeo de teste
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Speech
+          $s = New-Object System.Speech.Synthesis.SpeechSynthesizer
+          $s.SetOutputToWaveFile("$PWD\fala.wav")
+          $s.Speak("olha so isso, o carro custou duzentos mil reais e ninguem acreditou no que aconteceu depois")
+          $s.Dispose()
+          curl.exe -sfL -o rosto.jpg https://raw.githubusercontent.com/opencv/opencv/4.x/samples/data/messi5.jpg
+          desktop\bin\ffmpeg.exe -v error -y -f lavfi -i color=c=0x303848:s=1280x720:r=30 -loop 1 -i rosto.jpg -i fala.wav -filter_complex "[1:v]scale=-2:560[r];[0:v][r]overlay=x='-150+500*t/6':y=80:shortest=1[v]" -map "[v]" -map 2:a -shortest -c:v libx264 -pix_fmt yuv420p -c:a aac teste.mp4
+      - name: Testar (código)
+        run: python desktop/teste_pc.py
+      - name: Montar o programa
+        run: |
+          python -c "from PIL import Image;Image.open('android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png').save('desktop/icone.ico',sizes=[(256,256),(64,64),(48,48),(32,32),(16,16)])"
+          pyinstaller --noconfirm --windowed --name EditorJota --icon desktop/icone.ico --paths desktop --hidden-import gravador_pc --hidden-import soundcard --collect-data soundcard --exclude-module tkinter --exclude-module _tkinter --exclude-module unittest --exclude-module pydoc --exclude-module lib2to3 --exclude-module xmlrpc --exclude-module pdb --exclude-module doctest --exclude-module sqlite3 desktop/editorjota_pc.py > /dev/null
+          rm -f dist/EditorJota/_internal/cv2/opencv_videoio_ffmpeg*.dll
+          rm -rf editor/__pycache__ editor/.painel_tmp
+          cp -r editor dist/EditorJota/editor
+          cp -r desktop/bin dist/EditorJota/bin
+          du -sh dist/EditorJota
+      - name: Testar (programa .exe)
+        run: python desktop/teste_pc.py dist/EditorJota/EditorJota.exe
+      - name: Instalador
+        run: |
+          choco install innosetup -y --no-progress > /dev/null
+          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" //Q //DVersao=1.0.${{ github.run_number }} desktop/EditorJota.iss
+          ls -la saida_pc
+      - name: Publicar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "pc-v${{ github.run_number }}" saida_pc/EditorJota-Setup.exe --title "Editor Jota PC ${{ github.run_number }}" --notes "Editor Jota para Windows" --latest=false

@@ -19,7 +19,7 @@ Opcoes:
   --saida ARQUIVO.mp4  nome do arquivo final
   --previa             gera so uma imagem de previa (rapido), sem renderizar o video
 """
-import argparse, glob, json, os, random, re, subprocess, sys, tempfile
+import argparse, glob, json, os, random, re, shutil, subprocess, sys, tempfile
 
 try:
     from PIL import Image, ImageDraw, ImageFont, ImageChops
@@ -39,8 +39,8 @@ CANAIS_FILME = {"thejota", "neoronios", "nexora", "mentalista", "driverush", "ze
 # area da headline
 TXT_Y1, TXT_Y2, TXT_LARG = 280, 680, 960
 
-DOWNLOAD = os.path.expanduser("~/storage/shared/Download")
-SAIDA_PADRAO = os.path.expanduser("~/storage/shared/Memes_Prontos")
+DOWNLOAD = os.environ.get("EDITOR_DOWNLOAD") or os.path.expanduser("~/storage/shared/Download")
+SAIDA_PADRAO = os.environ.get("EDITOR_SAIDA") or os.path.expanduser("~/storage/shared/Memes_Prontos")
 
 
 def rodar(cmd, capturar=False):
@@ -904,11 +904,29 @@ def filme(a, video, nome, dur, dur_final, tem_audio, cena, vel, ini, cor, vol, f
 
 
 # ---------------------------------------------------------------- LEGENDA ANIMADA
-WHISPER_DIR = os.path.expanduser("~/whisper.cpp")
+WHISPER_DIR = os.environ.get("EDITOR_WHISPER_DIR") or os.path.expanduser("~/whisper.cpp")
+# versao PC: o modelo e baixado sozinho na primeira legenda
+WHISPER_MODELO_PC = "ggml-small-q5_1.bin"
+WHISPER_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/"
+
+
+def _baixar_modelo_pc():
+    import urllib.request
+    pasta = os.path.join(WHISPER_DIR, "models"); os.makedirs(pasta, exist_ok=True)
+    destino = os.path.join(pasta, WHISPER_MODELO_PC)
+    print("Baixando o Whisper (so na primeira vez, ~190 MB)...", flush=True)
+    tmp = destino + ".baixando"
+    with urllib.request.urlopen(WHISPER_URL + WHISPER_MODELO_PC, timeout=60) as r, open(tmp, "wb") as f:
+        shutil.copyfileobj(r, f, 1 << 20)
+    if os.path.getsize(tmp) < 20_000_000:
+        os.remove(tmp)
+        return None
+    os.replace(tmp, destino)
+    return destino
 
 
 def achar_whisper():
-    for b in ("build/bin/whisper-cli", "build/bin/main", "main"):
+    for b in ("build/bin/whisper-cli", "build/bin/main", "main", "whisper-cli.exe", "bin/whisper-cli.exe"):
         p = os.path.join(WHISPER_DIR, b)
         if os.path.exists(p):
             exe = p
@@ -919,6 +937,11 @@ def achar_whisper():
         mp = os.path.join(WHISPER_DIR, "models", m)
         if os.path.exists(mp):
             return exe, mp
+    if os.environ.get("EDITOR_JOTA_PC"):
+        try:
+            return exe, _baixar_modelo_pc()
+        except Exception as e:
+            print(f"Nao consegui baixar o Whisper: {e}", flush=True)
     return exe, None
 
 
