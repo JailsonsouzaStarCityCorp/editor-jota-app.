@@ -1910,8 +1910,8 @@ def seguir_rosto(video, ini, dur, cena, tmpdir):
     """acha o rosto principal ao longo do trecho: [(t, x, y)] de 0 a 1 dentro da cena, ou None"""
     try:
         import cv2
-    except Exception:
-        print("Enquadrar no rosto: OpenCV nao instalado (pkg install opencv-python). Usando o corte padrao.")
+    except Exception as e:
+        print(f"Enquadrar no rosto: OpenCV nao instalado ({type(e).__name__}: {e}). Usando o corte padrao.")
         return None
     cx, cy, cw, ch = cena
     n = max(4, min(45, int(dur / 0.8)))

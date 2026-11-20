@@ -48,7 +48,7 @@ def _som_do_pc():
         alto = sc.default_speaker()
         return sc.get_microphone(alto.name, include_loopback=True)
     except Exception as e:
-        _G["aviso"] = f"sem som do computador ({type(e).__name__}); gravando só a imagem"
+        _G["aviso"] = f"sem som do computador ({type(e).__name__}: {str(e)[:120]}); gravando só a imagem"
         return None
 
 
