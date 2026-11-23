@@ -35,7 +35,7 @@ W, H = 1080, 1920
 AREA = (0, 690, 1080, 1560)
 PAD = 14  # margem extra para o movimento do quadro
 IDIOMA = "pt"
-CANAIS_FILME = {"thejota", "neoronios", "nexora", "mentalista", "driverush", "zenthaku"}
+CANAIS_FILME = {"cineimpacto", "thejota", "neoronios", "nexora", "mentalista", "driverush", "zenthaku"}
 # area da headline
 TXT_Y1, TXT_Y2, TXT_LARG = 280, 680, 960
 
@@ -564,7 +564,7 @@ NOMES_CANAL = {"naoconte": "Não Conte a Ninguém", "memudobr": "@mememudobr", "
                "cortehubs": "Corte Hubs", "cityflow": "City Flow", "cyberdefend": "Cyber Defend",
                "silencio": "Depois do Silêncio", "qgclipes": "QG Clipes", "vrumm": "Universo Vrumm",
                # canais de filme
-               "thejota": "The Jota Cortes", "neoronios": "Neoronios Clips", "nexora": "Nexora Clips",
+               "thejota": "The Jota Cortes", "cineimpacto": "Cine Impacto", "neoronios": "Neoronios Clips", "nexora": "Nexora Clips",
                "mentalista": "O Mentalista", "zenthaku": "Zenthaku", "madruga": "Meme Madruga", "memeverse": "MemeVerse",
                "kreekcraft": "Fan Club Kreekcraft"}
 LOGOS = os.path.join(PASTA, "logos")
@@ -867,21 +867,7 @@ def filme(a, video, nome, dur, dur_final, tem_audio, cena, vel, ini, cor, vol, f
               f"crop={W}:{vh_box}:'(iw-{W})/2':'(ih-{vh_box})/2',setsar=1[v];"
               f"[bg][v]overlay=0:{vy}[x];[x][0:v]overlay=0:0,noise=alls=3:allf=t,{a._sub}format=yuv420p[out]")
     if tem_audio and not a.previa:
-        if sons:
-            filtro += f";[1:a]asetpts=PTS-STARTPTS,atempo={vel},volume={vol}[a0]"
-            rot = ["[a0]"]
-            for k, (t0, som) in enumerate(sons):
-                wav = os.path.join(tmpdir, f"som_{som}.wav")
-                if not os.path.exists(wav):
-                    _som_wav(som, wav)
-                idx = sum(1 for x in entradas if x == "-i")
-                entradas += ["-i", wav]
-                ms = int(t0 * 1000)
-                filtro += f";[{idx}:a]aformat=channel_layouts=stereo,adelay={ms}|{ms},volume=0.9[s{k}]"
-                rot.append(f"[s{k}]")
-            filtro += f";{''.join(rot)}amix=inputs={len(rot)}:duration=first:dropout_transition=0:normalize=0[a]"
-        else:
-            filtro += f";[1:a]asetpts=PTS-STARTPTS,atempo={vel},volume={vol}[a]"
+        filtro += f";[1:a]asetpts=PTS-STARTPTS,atempo={vel},volume={vol}[a]"
     if a.previa:
         prev = os.path.splitext(nome)[0] + "_previa.jpg"
         rodar(["ffmpeg", "-v", "error", "-y", "-loop", "1", "-i", camada, "-ss", f"{min(dur / 2, 3):.2f}",
